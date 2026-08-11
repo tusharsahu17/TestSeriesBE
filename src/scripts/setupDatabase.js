@@ -9,7 +9,7 @@ async function setupDatabase() {
 
     // Disable foreign key checks to allow dropping tables with references
     await connection.query('SET FOREIGN_KEY_CHECKS = 0');
-    
+
     const tablesToDrop = [
       'attempt_answers',
       'test_attempts',
@@ -172,7 +172,7 @@ async function setupDatabase() {
         total_marks DECIMAL(10,2) DEFAULT 0,
         obtained_marks DECIMAL(10,2) DEFAULT 0,
         percentage DECIMAL(5,2) DEFAULT 0,
-        rank INT,
+        \`rank\` INT,
         time_taken_seconds INT DEFAULT 0,
         status VARCHAR(30) DEFAULT 'IN_PROGRESS',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -209,7 +209,7 @@ async function setupDatabase() {
 
     const [mathResult] = await connection.query("INSERT INTO subjects (name, description) VALUES (?, ?)", ['Mathematics', 'Advanced Math']);
     const [physResult] = await connection.query("INSERT INTO subjects (name, description) VALUES (?, ?)", ['Physics', 'Advanced Physics']);
-    
+
     await connection.query("INSERT INTO exam_subjects (exam_id, subject_id, display_order) VALUES (?, ?, ?)", [examId, mathResult.insertId, 1]);
     await connection.query("INSERT INTO exam_subjects (exam_id, subject_id, display_order) VALUES (?, ?, ?)", [examId, physResult.insertId, 2]);
 
