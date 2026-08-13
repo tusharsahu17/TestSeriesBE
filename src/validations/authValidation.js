@@ -10,4 +10,6 @@ const login = Joi.object({
   password: Joi.string().required(),
 });
 
-module.exports = { register, login };
+const adminLogin = login; // Reuse the same validation for admin login
+
+module.exports = { register, login, adminLogin };
