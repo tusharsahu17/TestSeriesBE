@@ -1,0 +1,508 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Quiz Application API",
+    "version": "1.0.0",
+    "description": "API documentation for the Node.js Quiz Application"
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/tests/{testId}": {
+      "get": {
+        "summary": "Get details of a specific test",
+        "tags": [
+          "Tests"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "testId",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true,
+            "description": "The test ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Test details"
+          },
+          "404": {
+            "description": "Test not found"
+          }
+        }
+      }
+    },
+    "/api/tests/{testId}/questions": {
+      "get": {
+        "summary": "Get questions and options for a specific test",
+        "tags": [
+          "Tests"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "testId",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true,
+            "description": "The test ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of questions with their options"
+          }
+        }
+      }
+    },
+    "/api/tests/{testId}/start": {
+      "post": {
+        "summary": "Start a new attempt for a test",
+        "tags": [
+          "Tests"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "testId",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true,
+            "description": "The test ID"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "integer",
+                    "description": "User ID (temporary MVP fallback)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns the attemptId"
+          }
+        }
+      }
+    },
+    "/api/subjects/{subjectId}/tests": {
+      "get": {
+        "summary": "Get all active tests for a specific subject",
+        "tags": [
+          "Subjects"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subjectId",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true,
+            "description": "The subject ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of tests"
+          }
+        }
+      }
+    },
+    "/api/exams": {
+      "get": {
+        "summary": "Get all active exams",
+        "tags": [
+          "Exams"
+        ],
+        "responses": {
+          "200": {
+            "description": "List of active exams"
+          }
+        }
+      }
+    },
+    "/api/exams/{examId}": {
+      "get": {
+        "summary": "Get details of a specific exam",
+        "tags": [
+          "Exams"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "examId",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true,
+            "description": "The exam ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exam details"
+          },
+          "404": {
+            "description": "Exam not found"
+          }
+        }
+      }
+    },
+    "/api/exams/{examId}/subjects": {
+      "get": {
+        "summary": "Get subjects for a specific exam",
+        "tags": [
+          "Exams"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "examId",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true,
+            "description": "The exam ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of subjects belonging to the exam"
+          }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "summary": "Register a new user",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User registered successfully"
+          },
+          "400": {
+            "description": "Validation Error"
+          },
+          "409": {
+            "description": "Username already exists"
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Login a user",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          }
+        }
+      }
+    },
+    "/api/attempts/": {
+      "get": {
+        "summary": "Get all test attempts for the current user",
+        "tags": [
+          "Attempts"
+        ],
+        "responses": {
+          "200": {
+            "description": "List of attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/attempts/{attemptId}/answer": {
+      "post": {
+        "summary": "Save an answer for a specific test attempt",
+        "tags": [
+          "Attempts"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attemptId",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true,
+            "description": "The attempt ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "questionId",
+                  "optionId"
+                ],
+                "properties": {
+                  "questionId": {
+                    "type": "integer"
+                  },
+                  "optionId": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result of the saved answer"
+          }
+        }
+      }
+    },
+    "/api/attempts/{attemptId}/submit": {
+      "post": {
+        "summary": "Submit a test attempt and calculate final score",
+        "tags": [
+          "Attempts"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attemptId",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true,
+            "description": "The attempt ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Final score and status"
+          }
+        }
+      }
+    },
+    "/api/attempts/{attemptId}/result": {
+      "get": {
+        "summary": "Get the result of a completed attempt",
+        "tags": [
+          "Attempts"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attemptId",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true,
+            "description": "The attempt ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attempt details including all saved answers"
+          },
+          "404": {
+            "description": "Attempt not found"
+          }
+        }
+      }
+    },
+    "/api/attempts/{attemptId}/answers": {
+      "get": {
+        "summary": "Get the detailed answers for an attempt",
+        "tags": [
+          "Attempts"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attemptId",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true,
+            "description": "The attempt ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attempt details including deep question/option hierarchy"
+          },
+          "404": {
+            "description": "Attempt not found"
+          }
+        }
+      }
+    },
+    "/api/admin/auth/login": {
+      "post": {
+        "summary": "Login an admin",
+        "tags": [
+          "Admin"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Admin login successful"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          }
+        }
+      }
+    },
+    "/api/admin/dashboard": {
+      "get": {
+        "summary": "Get admin dashboard overview",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "Dashboard metrics and overview data"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Tests",
+      "description": "Test and questions APIs"
+    },
+    {
+      "name": "Subjects",
+      "description": "Subject and test mapping APIs"
+    },
+    {
+      "name": "Exams",
+      "description": "Exam management APIs"
+    },
+    {
+      "name": "Auth",
+      "description": "Authentication management"
+    },
+    {
+      "name": "Attempts",
+      "description": "Test attempt and submission APIs"
+    },
+    {
+      "name": "Admin",
+      "description": "Admin management and routes"
+    }
+  ]
+}

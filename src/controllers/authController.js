@@ -22,7 +22,19 @@ const login = async (req, res) => {
   }
 };
 
+const adminLogin = async (req, res) => {
+  const { username, password } = req.body;
+  try {
+    const result = await authService.adminLoginUser(username, password);
+    res.json(result);
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ message: error.message || 'Server error' });
+  }
+};
+
 module.exports = {
   register,
-  login
+  login,
+  adminLogin
 };

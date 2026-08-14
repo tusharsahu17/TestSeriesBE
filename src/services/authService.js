@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const userModel = require('../models/userModel');
+const adminModel = require('../models/adminModel');
 
 const registerUser = async (username, password) => {
   try {
@@ -41,7 +42,32 @@ const loginUser = async (username, password) => {
   return { token, message: 'Login successful' };
 };
 
+const adminLoginUser = async (username, password) => {
+  const admin = await adminModel.findAdminByUsername(username);
+  if (!admin) {
+    const err = new Error('Invalid credentials');
+    err.status = 401;
+    throw err;
+  }
+
+  const match = await bcrypt.compare(password, admin.password_hash);
+  if (!match) {
+    const err = new Error('Invalid credentials');
+    err.status = 401;
+    throw err;
+  }
+
+  const token = jwt.sign(
+    { adminId: admin.id, username: admin.username, role: 'admin' }, 
+    process.env.JWT_SECRET || 'secret_key', 
+    { expiresIn: '1h' }
+  );
+  
+  return { token, message: 'Admin login successful' };
+};
+
 module.exports = {
   registerUser,
-  loginUser
+  loginUser,
+  adminLoginUser
 };
