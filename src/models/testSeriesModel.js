@@ -107,7 +107,7 @@ async function getTestSeriesById(id) {
     if (series.length === 0) return null;
 
     const [tests] = await connection.query(`
-      SELECT t.*, tst.display_order, tst.id as mapping_id
+      SELECT t.*, tst.display_order
       FROM tests t
       JOIN test_series_tests tst ON t.id = tst.test_id
       WHERE tst.test_series_id = ?
@@ -148,6 +148,34 @@ async function reorderTestsInSeries(seriesId, orderedTestIds) {
       await connection.query(
         'UPDATE test_series_tests SET display_order = ? WHERE test_series_id = ? AND test_id = ?',
         [i, seriesId, testId]
+      );
+    }
+
+    await connection.commit();
+    return true;
+  } catch (err) {
+    if (connection) await connection.rollback();
+    throw err;
+  } finally {
+    if (connection) await connection.end();
+  }
+}
+
+async function syncTestsInSeries(seriesId, testIds) {
+  let connection;
+  try {
+    connection = await createDbConnection();
+    await connection.beginTransaction();
+
+    // Remove all existing mappings
+    await connection.query('DELETE FROM test_series_tests WHERE test_series_id = ?', [seriesId]);
+
+    // Insert new mappings in the given order
+    for (let i = 0; i < testIds.length; i++) {
+      const testId = testIds[i];
+      await connection.query(
+        'INSERT INTO test_series_tests (test_series_id, test_id, display_order) VALUES (?, ?, ?)',
+        [seriesId, testId, i + 1]
       );
     }
 
@@ -214,5 +242,6 @@ module.exports = {
   getTestSeriesById,
   addTestToSeries,
   reorderTestsInSeries,
+  syncTestsInSeries,
   duplicateTestSeries
 };

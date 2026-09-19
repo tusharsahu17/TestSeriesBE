@@ -323,4 +323,37 @@ router.post('/:id/tests', adminTestSeriesController.addTest);
  */
 router.put('/:id/tests/reorder', adminTestSeriesController.reorderTests);
 
+/**
+ * @swagger
+ * /api/admin/test-series/{id}/tests/sync:
+ *   put:
+ *     summary: Sync all tests for a test series
+ *     tags: [Admin - Test Series]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - test_ids
+ *             properties:
+ *               test_ids:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *     responses:
+ *       200:
+ *         description: Tests synced successfully
+ *       500:
+ *         description: Server error
+ */
+router.put('/:id/tests/sync', adminTestSeriesController.syncTests);
+
 module.exports = router;

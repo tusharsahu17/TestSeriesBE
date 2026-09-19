@@ -122,6 +122,20 @@ const getSeriesDetails = async (req, res) => {
   }
 };
 
+const syncTests = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { test_ids } = req.body;
+    if (!Array.isArray(test_ids)) {
+      return res.status(400).json({ error: 'test_ids array is required' });
+    }
+    await testSeriesModel.syncTestsInSeries(id, test_ids);
+    res.json({ message: 'Tests synced successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to sync tests', details: error.message });
+  }
+};
+
 module.exports = {
   createSeries,
   updateSeries,
@@ -132,5 +146,6 @@ module.exports = {
   addTest,
   reorderTests,
   listSeries,
-  getSeriesDetails
+  getSeriesDetails,
+  syncTests
 };
