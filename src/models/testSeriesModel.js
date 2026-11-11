@@ -5,11 +5,12 @@ async function createTestSeries(data) {
   try {
     connection = await createDbConnection();
     const { title, description, thumbnail_url, price, is_paid, validity_days, start_date, end_date, category_id, difficulty_level, is_published } = data;
+    const publishedAt = is_published ? new Date() : null;
     const [result] = await connection.query(
       `INSERT INTO test_series 
-        (title, description, thumbnail_url, price, is_paid, validity_days, start_date, end_date, category_id, difficulty_level, is_published) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [title, description, thumbnail_url, price || 0, is_paid || false, validity_days, start_date, end_date, category_id, difficulty_level, is_published || false]
+        (title, description, thumbnail_url, price, is_paid, validity_days, start_date, end_date, category_id, difficulty_level, is_published, published_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [title, description, thumbnail_url, price || 0, is_paid || false, validity_days, start_date, end_date, category_id, difficulty_level, is_published || false, publishedAt]
     );
     return result.insertId;
   } finally {
@@ -37,7 +38,13 @@ async function updateTestSeries(id, data) {
     if (end_date !== undefined) { fields.push('end_date = ?'); values.push(end_date); }
     if (category_id !== undefined) { fields.push('category_id = ?'); values.push(category_id); }
     if (difficulty_level !== undefined) { fields.push('difficulty_level = ?'); values.push(difficulty_level); }
-    if (is_published !== undefined) { fields.push('is_published = ?'); values.push(is_published); }
+    if (is_published !== undefined) {
+      fields.push('is_published = ?');
+      values.push(is_published);
+      if (is_published) {
+        fields.push('published_at = COALESCE(published_at, NOW())');
+      }
+    }
     if (is_archived !== undefined) { fields.push('is_archived = ?'); values.push(is_archived); }
 
     if (fields.length === 0) return true; // nothing to update

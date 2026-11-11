@@ -42,13 +42,13 @@ async function saveAnswer(attemptId, questionId, optionId) {
   }
 }
 
-async function submitAttempt(attemptId) {
+async function submitAttempt(attemptId, timeTakenSeconds = null) {
   let connection;
   try {
     connection = await createDbConnection();
     
     // Fetch attempt and test info
-    const [attemptInfoRows] = await connection.query('SELECT test_id, total_questions FROM test_attempts WHERE id = ?', [attemptId]);
+    const [attemptInfoRows] = await connection.query('SELECT user_id, test_id, total_questions FROM test_attempts WHERE id = ?', [attemptId]);
     if (attemptInfoRows.length === 0) throw new Error('Attempt not found');
     const attemptInfo = attemptInfoRows[0];
     
@@ -82,9 +82,16 @@ async function submitAttempt(attemptId) {
       UPDATE test_attempts 
       SET status = 'COMPLETED', submitted_at = CURRENT_TIMESTAMP, 
           attempted_questions = ?, correct_answers = ?, wrong_answers = ?, skipped_questions = ?,
-          obtained_marks = ?, total_marks = ?, percentage = ?
+          obtained_marks = ?, total_marks = ?, percentage = ?,
+          time_taken_seconds = COALESCE(NULLIF(?, 0), GREATEST(TIMESTAMPDIFF(SECOND, started_at, CURRENT_TIMESTAMP), 0))
       WHERE id = ?
-    `, [attempted, correct, wrong, skipped, score, totalMarks, percentage, attemptId]);
+    `, [attempted, correct, wrong, skipped, score, totalMarks, percentage, timeTakenSeconds || 0, attemptId]);
+
+    await connection.query('UPDATE users SET last_active_at = NOW() WHERE id = ?', [attemptInfo.user_id]);
+    await connection.query(
+      'INSERT INTO user_activity_logs (user_id, activity_type, reference_id) VALUES (?, ?, ?)',
+      [attemptInfo.user_id, 'TEST_SUBMIT', attemptId]
+    );
 
     return { success: true, score, percentage };
   } finally {

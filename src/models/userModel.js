@@ -5,10 +5,36 @@ const createUser = async (username, passwordHash) => {
   try {
     connection = await createDbConnection();
     const [result] = await connection.execute(
-      'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
+      'INSERT INTO users (username, password_hash, role, last_active_at) VALUES (?, ?, ?, NOW())',
       [username, passwordHash, 'student']
     );
     return result.insertId;
+  } finally {
+    if (connection) await connection.end();
+  }
+};
+
+const recordUserActivity = async (userId, activityType, referenceId = null, isLogin = false) => {
+  let connection;
+  try {
+    connection = await createDbConnection();
+    if (isLogin) {
+      await connection.execute(
+        'UPDATE users SET last_login_at = NOW(), last_active_at = NOW() WHERE id = ?',
+        [userId]
+      );
+    } else {
+      await connection.execute(
+        'UPDATE users SET last_active_at = NOW() WHERE id = ?',
+        [userId]
+      );
+    }
+    await connection.execute(
+      'INSERT INTO user_activity_logs (user_id, activity_type, reference_id) VALUES (?, ?, ?)',
+      [userId, activityType, referenceId]
+    );
+  } catch (err) {
+    console.error('Failed to record user activity:', err.message);
   } finally {
     if (connection) await connection.end();
   }
@@ -135,6 +161,7 @@ const updateUserSubscription = async (userId, status) => {
 
 module.exports = {
   createUser,
+  recordUserActivity,
   findUserByUsername,
   getAllUsers,
   getUserById,

@@ -38,6 +38,8 @@ const loginUser = async (username, password) => {
     process.env.JWT_SECRET || 'secret_key', 
     { expiresIn: '1h' }
   );
+
+  await userModel.recordUserActivity(user.id, 'LOGIN', null, true);
   
   return { token, message: 'Login successful' };
 };

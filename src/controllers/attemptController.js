@@ -12,7 +12,8 @@ async function saveAnswer(req, res) {
 
 async function submitAttempt(req, res) {
   try {
-    const result = await attemptModel.submitAttempt(req.params.attemptId);
+    const timeTakenSeconds = req.body?.time_taken_seconds || req.body?.timeTakenSeconds || null;
+    const result = await attemptModel.submitAttempt(req.params.attemptId, timeTakenSeconds);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

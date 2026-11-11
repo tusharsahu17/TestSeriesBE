@@ -51,7 +51,7 @@ async function getQuestionsForTest(testId) {
   }
 }
 
-async function startTestAttempt(userId, testId) {
+async function startTestAttempt(userId, testId, testSeriesId = null) {
   let connection;
   try {
     connection = await createDbConnection();
@@ -61,9 +61,15 @@ async function startTestAttempt(userId, testId) {
     const totalQuestions = test[0]?.total_questions || 0;
 
     const [result] = await connection.query(`
-      INSERT INTO test_attempts (user_id, test_id, total_questions) 
-      VALUES (?, ?, ?)
-    `, [userId, testId, totalQuestions]);
+      INSERT INTO test_attempts (user_id, test_id, test_series_id, total_questions) 
+      VALUES (?, ?, ?, ?)
+    `, [userId, testId, testSeriesId || null, totalQuestions]);
+
+    await connection.query('UPDATE users SET last_active_at = NOW() WHERE id = ?', [userId]);
+    await connection.query(
+      'INSERT INTO user_activity_logs (user_id, activity_type, reference_id) VALUES (?, ?, ?)',
+      [userId, 'TEST_START', testId]
+    );
     
     return { attemptId: result.insertId };
   } finally {

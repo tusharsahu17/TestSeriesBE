@@ -5,6 +5,8 @@ const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/adminRoutes');
 const adminUserRoutes = require('./routes/adminUserRoutes');
 const adminDashboardRoutes = require('./routes/adminDashboardRoutes');
+const adminEnrollmentRoutes = require('./routes/adminEnrollmentRoutes');
+const adminPaymentRoutes = require('./routes/adminPaymentRoutes');
 const adminTestSeriesRoutes = require('./routes/adminTestSeriesRoutes');
 const adminTestRoutes = require('./routes/adminTestRoutes');
 const adminQuestionRoutes = require('./routes/adminQuestionRoutes');
@@ -22,7 +24,10 @@ const swaggerSpec = require('./config/swagger');
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: true,
+  credentials: true,
+}));
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
@@ -35,6 +40,8 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/admin/auth', adminRoutes);
 app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
+app.use('/api/admin/enrollments', adminEnrollmentRoutes);
+app.use('/api/admin/payments', adminPaymentRoutes);
 app.use('/api/admin/test-series', adminTestSeriesRoutes);
 app.use('/api/admin/tests', adminTestRoutes);
 app.use('/api/admin/questions', adminQuestionRoutes);

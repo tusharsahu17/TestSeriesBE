@@ -22,8 +22,9 @@ async function getTestQuestions(req, res) {
 async function startTest(req, res) {
   try {
     // For MVP, fallback to body or hardcoded if missing
-    const userId = req.user?.id || req.body.userId || 1; 
-    const result = await testModel.startTestAttempt(userId, req.params.testId);
+    const userId = req.user?.id || req.body?.userId || 1;
+    const testSeriesId = req.body?.testSeriesId || req.body?.test_series_id || null;
+    const result = await testModel.startTestAttempt(userId, req.params.testId, testSeriesId);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
