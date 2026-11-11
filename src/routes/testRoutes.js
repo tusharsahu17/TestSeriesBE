@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const testController = require('../controllers/testController');
+const { optionalAuthenticateToken } = require('../middleware/authMiddleware');
 
 /**
  * @swagger
@@ -75,6 +76,6 @@ router.get('/:testId/questions', testController.getTestQuestions);
  *       200:
  *         description: Returns the attemptId
  */
-router.post('/:testId/start', testController.startTest);
+router.post('/:testId/start', optionalAuthenticateToken, testController.startTest);
 
 module.exports = router;

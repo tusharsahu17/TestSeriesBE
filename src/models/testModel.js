@@ -1,4 +1,5 @@
 const { createDbConnection } = require('../config/db');
+const { loadTestQuestionsMap } = require('./studentDashboardModel');
 
 async function getTestById(testId) {
   let connection;
@@ -15,23 +16,20 @@ async function getQuestionsForTest(testId) {
   let connection;
   try {
     connection = await createDbConnection();
-    // Fetch questions
-    const [questions] = await connection.query(`
-      SELECT * FROM questions 
-      WHERE test_id = ? 
-      ORDER BY display_order ASC
-    `, [testId]);
-    
+    const numericId = Number(testId);
+    const questionsMap = await loadTestQuestionsMap(connection, [numericId]);
+    const questions = questionsMap.get(numericId) || [];
+
     if (questions.length === 0) return [];
 
     const questionIds = questions.map(q => q.id);
-    
+
     // Fetch options for these questions
     const [options] = await connection.query(`
       SELECT id, question_id, option_text, option_key, display_order 
       FROM question_options 
       WHERE question_id IN (?)
-      ORDER BY display_order ASC
+      ORDER BY display_order ASC, id ASC
     `, [questionIds]);
 
     // Group options by question_id

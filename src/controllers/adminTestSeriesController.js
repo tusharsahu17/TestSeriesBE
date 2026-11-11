@@ -1,4 +1,6 @@
 const testSeriesModel = require('../models/testSeriesModel');
+const notificationModel = require('../models/notificationModel');
+const { createDbConnection } = require('../config/db');
 
 const createSeries = async (req, res) => {
   try {
@@ -75,6 +77,13 @@ const addTest = async (req, res) => {
       return res.status(400).json({ error: 'test_id is required' });
     }
     await testSeriesModel.addTestToSeries(id, test_id, order);
+    let connection;
+    try {
+      connection = await createDbConnection();
+      await notificationModel.notifyNewTestPublished(connection, Number(test_id));
+    } finally {
+      if (connection) await connection.end();
+    }
     res.status(201).json({ message: 'Test added to series successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to add test to series', details: error.message });

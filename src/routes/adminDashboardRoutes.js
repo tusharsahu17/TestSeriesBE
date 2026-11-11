@@ -173,4 +173,40 @@ router.get('/revenue', adminDashboardController.getRevenueAnalytics);
  */
 router.get('/student-performance', adminDashboardController.getStudentPerformanceAnalytics);
 
+/**
+ * @swagger
+ * /api/admin/dashboard/notifications:
+ *   post:
+ *     summary: Create an announcement or targeted student notification
+ *     tags: [Admin - Dashboard]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - message
+ *             properties:
+ *               type:
+ *                 type: string
+ *                 enum: [NEW_TEST, RESULT_PUBLISHED, SERIES_EXPIRING, PAYMENT_CONFIRMED, ANNOUNCEMENT]
+ *               targetAudience:
+ *                 type: string
+ *                 enum: [USER, ALL_STUDENTS, SERIES_ENROLLED]
+ *               userId:
+ *                 type: integer
+ *               targetSeriesId:
+ *                 type: integer
+ *               title:
+ *                 type: string
+ *               message:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Notification created
+ */
+router.post('/notifications', adminDashboardController.createNotification);
+
 module.exports = router;

@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const attemptController = require('../controllers/attemptController');
+const { optionalAuthenticateToken } = require('../middleware/authMiddleware');
+
+router.use(optionalAuthenticateToken);
 
 /**
  * @swagger

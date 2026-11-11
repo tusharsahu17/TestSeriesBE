@@ -1,4 +1,6 @@
 const testModel = require('../models/testModel');
+const notificationModel = require('../models/notificationModel');
+const { createDbConnection } = require('../config/db');
 
 const createTestHandler = async (req, res) => {
   try {
@@ -7,6 +9,15 @@ const createTestHandler = async (req, res) => {
       return res.status(400).json({ error: 'Test name is required' });
     }
     const testId = await testModel.createTest(req.body);
+    if (req.body.is_published) {
+      let connection;
+      try {
+        connection = await createDbConnection();
+        await notificationModel.notifyNewTestPublished(connection, testId);
+      } finally {
+        if (connection) await connection.end();
+      }
+    }
     res.status(201).json({ message: 'Test created successfully', testId });
   } catch (error) {
     res.status(500).json({ error: 'Failed to create test', details: error.message });
@@ -79,6 +90,15 @@ const togglePublishHandler = async (req, res) => {
       return res.status(400).json({ error: 'is_published boolean value is required' });
     }
     await testModel.updateTest(id, { is_published });
+    if (is_published) {
+      let connection;
+      try {
+        connection = await createDbConnection();
+        await notificationModel.notifyNewTestPublished(connection, Number(id));
+      } finally {
+        if (connection) await connection.end();
+      }
+    }
     res.json({ message: `Test ${is_published ? 'published' : 'unpublished'} successfully` });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update publish status', details: error.message });

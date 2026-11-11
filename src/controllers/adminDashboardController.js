@@ -1,4 +1,5 @@
 const dashboardModel = require('../models/dashboardModel');
+const notificationModel = require('../models/notificationModel');
 
 const getDashboardOverview = async (req, res) => {
   try {
@@ -70,6 +71,24 @@ const getStudentPerformanceAnalytics = async (req, res) => {
   }
 };
 
+const createNotification = async (req, res) => {
+  try {
+    const id = await notificationModel.createNotification(req.body || {});
+    res.status(201).json({
+      success: true,
+      message: 'Notification created successfully',
+      data: { id },
+    });
+  } catch (error) {
+    const status = error.status || 500;
+    console.error('Error creating notification:', error);
+    res.status(status).json({
+      success: false,
+      message: error.message || 'Failed to create notification',
+    });
+  }
+};
+
 module.exports = {
   getDashboardOverview,
   getOverviewCards,
@@ -77,5 +96,6 @@ module.exports = {
   getTestAnalytics,
   getTestSeriesPerformance,
   getRevenueAnalytics,
-  getStudentPerformanceAnalytics
+  getStudentPerformanceAnalytics,
+  createNotification
 };

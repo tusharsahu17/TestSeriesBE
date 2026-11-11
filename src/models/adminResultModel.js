@@ -1,4 +1,6 @@
 const { createDbConnection } = require('../config/db');
+const { loadTestQuestionsMap, computeAttemptEvaluation } = require('./studentDashboardModel');
+const notificationModel = require('./notificationModel');
 
 async function getTestWiseResults(testId) {
   let connection;
@@ -107,9 +109,14 @@ async function recalculateTestResults(testId) {
     connection = await createDbConnection();
     await connection.beginTransaction();
 
-    // 1. Fetch current questions and their correct options
-    const [questions] = await connection.query('SELECT * FROM questions WHERE test_id = ?', [testId]);
-    
+    const numericTestId = Number(testId);
+    const [testRows] = await connection.query('SELECT id, negative_marking FROM tests WHERE id = ?', [numericTestId]);
+    const testNegativeMarking = testRows.length > 0 ? Number(testRows[0].negative_marking || 0) : 0;
+
+    // 1. Fetch current questions (direct + mapped via test_questions) and their correct options
+    const questionsMap = await loadTestQuestionsMap(connection, [numericTestId]);
+    const questions = questionsMap.get(numericTestId) || [];
+
     if (questions.length === 0) {
       await connection.rollback();
       return { message: 'No questions found for this test.' };
@@ -118,70 +125,68 @@ async function recalculateTestResults(testId) {
     const questionIds = questions.map(q => q.id);
     const [options] = await connection.query('SELECT * FROM question_options WHERE question_id IN (?)', [questionIds]);
 
-    // Build a map of questionId -> { question, correctOptionIds }
     const questionMap = {};
+    let testTotalMarks = 0;
     for (const q of questions) {
+      const qMarks = Number(q.marks) > 0 ? Number(q.marks) : 1;
+      testTotalMarks += qMarks;
       const correctOpts = options.filter(o => o.question_id === q.id && o.is_correct === 1).map(o => o.id);
       questionMap[q.id] = {
         ...q,
+        effectiveMarks: qMarks,
+        effectiveNegativeMarks: Number(q.negative_marks) > 0 ? Number(q.negative_marks) : testNegativeMarking,
         correctOptionIds: correctOpts
       };
     }
 
-    // 2. Fetch all completed attempts for this test
-    const [attempts] = await connection.query('SELECT * FROM test_attempts WHERE test_id = ? AND status = "COMPLETED"', [testId]);
+    // 2. Fetch all completed/submitted attempts for this test
+    const [attempts] = await connection.query(
+      "SELECT * FROM test_attempts WHERE test_id = ? AND UPPER(status) IN ('COMPLETED', 'EVALUATED', 'SUBMITTED', 'PENDING_EVALUATION')",
+      [numericTestId]
+    );
 
     for (const attempt of attempts) {
-      // Fetch answers for this attempt
       const [answers] = await connection.query('SELECT * FROM attempt_answers WHERE attempt_id = ?', [attempt.id]);
+      const answersByQ = new Map();
+      for (const ans of answers) {
+        answersByQ.set(Number(ans.question_id), ans);
+      }
 
-      let totalMarks = 0;
       let obtainedMarks = 0;
       let correctAnswersCount = 0;
       let wrongAnswersCount = 0;
       let skippedQuestionsCount = 0;
       let attemptedQuestionsCount = 0;
 
-      for (const ans of answers) {
-        const qData = questionMap[ans.question_id];
-        
-        // If question was deleted from test, skip it in calculation
-        if (!qData) continue;
-        
-        totalMarks += parseFloat(qData.marks);
+      for (const q of questions) {
+        const qData = questionMap[q.id];
+        const ans = answersByQ.get(Number(q.id));
 
-        if (ans.selected_option_id === null) {
+        if (!ans || ans.selected_option_id === null || ans.selected_option_id === undefined) {
           skippedQuestionsCount++;
-          // Update attempt_answers
-          await connection.query('UPDATE attempt_answers SET is_correct = 0, marks_obtained = 0 WHERE id = ?', [ans.id]);
+          if (ans) {
+            await connection.query('UPDATE attempt_answers SET is_correct = NULL, marks_obtained = 0 WHERE id = ?', [ans.id]);
+          }
         } else {
           attemptedQuestionsCount++;
           const isCorrect = qData.correctOptionIds.includes(ans.selected_option_id);
-          
-          let marksObtainedForQ = 0;
-          if (isCorrect) {
-            correctAnswersCount++;
-            marksObtainedForQ = parseFloat(qData.marks);
-          } else {
-            wrongAnswersCount++;
-            marksObtainedForQ = -parseFloat(qData.negative_marks);
-          }
-          
+          const marksObtainedForQ = isCorrect ? qData.effectiveMarks : -qData.effectiveNegativeMarks;
+          if (isCorrect) correctAnswersCount++;
+          else wrongAnswersCount++;
           obtainedMarks += marksObtainedForQ;
 
-          // Update attempt_answers
           await connection.query('UPDATE attempt_answers SET is_correct = ?, marks_obtained = ? WHERE id = ?', [
             isCorrect ? 1 : 0, marksObtainedForQ, ans.id
           ]);
         }
       }
 
-      // Update test_attempts
-      const percentage = totalMarks > 0 ? (obtainedMarks / totalMarks) * 100 : 0;
-      
+      const percentage = testTotalMarks > 0 ? (obtainedMarks / testTotalMarks) * 100 : 0;
+
       await connection.query(`
         UPDATE test_attempts 
         SET 
+          status = 'COMPLETED',
           total_questions = ?,
           attempted_questions = ?,
           correct_answers = ?,
@@ -197,7 +202,7 @@ async function recalculateTestResults(testId) {
         correctAnswersCount,
         wrongAnswersCount,
         skippedQuestionsCount,
-        totalMarks,
+        testTotalMarks,
         obtainedMarks,
         percentage,
         attempt.id
@@ -207,15 +212,18 @@ async function recalculateTestResults(testId) {
     // 3. Recalculate ranks based on newly calculated obtained_marks
     const [updatedAttempts] = await connection.query(`
       SELECT id FROM test_attempts 
-      WHERE test_id = ? AND status = 'COMPLETED' 
+      WHERE test_id = ? AND UPPER(status) IN ('COMPLETED', 'EVALUATED')
       ORDER BY obtained_marks DESC, time_taken_seconds ASC
-    `, [testId]);
+    `, [numericTestId]);
 
     for (let i = 0; i < updatedAttempts.length; i++) {
       await connection.query('UPDATE test_attempts SET rank = ? WHERE id = ?', [i + 1, updatedAttempts[i].id]);
     }
 
     await connection.commit();
+    for (const attempt of attempts) {
+      await notificationModel.notifyResultPublished(connection, attempt.id);
+    }
     return { message: `Recalculated results for ${attempts.length} attempts.` };
   } catch (err) {
     if (connection) await connection.rollback();

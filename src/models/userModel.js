@@ -58,13 +58,17 @@ const getAllUsers = async (filters = {}) => {
   let connection;
   try {
     connection = await createDbConnection();
-    let query = 'SELECT id, username, role, status, subscription_status, created_at, name, email, phone FROM users WHERE role = "student"';
+    let query = `
+      SELECT id, username, role, status, subscription_status, created_at, name, email, phone, last_login_at, last_active_at
+      FROM users
+      WHERE role = "student"
+    `;
     const queryParams = [];
 
     if (filters.search) {
-      query += ' AND (username LIKE ? OR name LIKE ? OR email LIKE ?)';
+      query += ' AND (username LIKE ? OR name LIKE ? OR email LIKE ? OR phone LIKE ?)';
       const searchParam = `%${filters.search}%`;
-      queryParams.push(searchParam, searchParam, searchParam);
+      queryParams.push(searchParam, searchParam, searchParam, searchParam);
     }
     if (filters.status) {
       query += ' AND status = ?';
@@ -74,14 +78,18 @@ const getAllUsers = async (filters = {}) => {
       query += ' AND subscription_status = ?';
       queryParams.push(filters.subscription);
     }
-    if (filters.dateFrom && filters.dateTo) {
-      query += ' AND created_at BETWEEN ? AND ?';
-      queryParams.push(filters.dateFrom, filters.dateTo);
+    if (filters.dateFrom) {
+      query += ' AND DATE(created_at) >= ?';
+      queryParams.push(filters.dateFrom);
+    }
+    if (filters.dateTo) {
+      query += ' AND DATE(created_at) <= ?';
+      queryParams.push(filters.dateTo);
     }
 
     query += ' ORDER BY created_at DESC';
 
-    const [rows] = await connection.execute(query, queryParams);
+    const [rows] = await connection.query(query, queryParams);
     return rows;
   } finally {
     if (connection) await connection.end();
@@ -93,7 +101,9 @@ const getUserById = async (userId) => {
   try {
     connection = await createDbConnection();
     const [rows] = await connection.execute(
-      'SELECT id, username, role, status, subscription_status, created_at, name, email, phone FROM users WHERE id = ?',
+      `SELECT id, username, role, status, subscription_status, created_at, name, email, phone, last_login_at, last_active_at
+       FROM users
+       WHERE id = ?`,
       [userId]
     );
     return rows.length ? rows[0] : null;
@@ -134,12 +144,48 @@ const updateUserDetails = async (userId, details) => {
   let connection;
   try {
     connection = await createDbConnection();
-    const { name, email, phone } = details;
+    const fields = [];
+    const values = [];
+
+    if (details.name !== undefined) {
+      fields.push('name = ?');
+      values.push(details.name);
+    }
+    if (details.email !== undefined) {
+      fields.push('email = ?');
+      values.push(details.email);
+    }
+    if (details.phone !== undefined) {
+      fields.push('phone = ?');
+      values.push(details.phone);
+    }
+
+    if (fields.length === 0) {
+      const [rows] = await connection.execute('SELECT id FROM users WHERE id = ?', [userId]);
+      return rows.length > 0;
+    }
+
+    values.push(userId);
     const [result] = await connection.execute(
-      'UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?',
-      [name, email, phone, userId]
+      `UPDATE users SET ${fields.join(', ')} WHERE id = ?`,
+      values
     );
     return result.affectedRows > 0;
+  } finally {
+    if (connection) await connection.end();
+  }
+};
+
+const logAdminUserAction = async (userId, activityType, referenceId = null, metadata = null) => {
+  let connection;
+  try {
+    connection = await createDbConnection();
+    await connection.query(
+      'INSERT INTO user_activity_logs (user_id, activity_type, reference_id, metadata) VALUES (?, ?, ?, ?)',
+      [userId, activityType, referenceId, metadata ? JSON.stringify(metadata) : null]
+    );
+  } catch (err) {
+    console.error('Failed to log admin user action:', err.message);
   } finally {
     if (connection) await connection.end();
   }
@@ -162,6 +208,7 @@ const updateUserSubscription = async (userId, status) => {
 module.exports = {
   createUser,
   recordUserActivity,
+  logAdminUserAction,
   findUserByUsername,
   getAllUsers,
   getUserById,

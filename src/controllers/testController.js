@@ -1,4 +1,5 @@
 const testModel = require('../models/testModel');
+const studentDashboardModel = require('../models/studentDashboardModel');
 
 async function getTestDetails(req, res) {
   try {
@@ -21,13 +22,24 @@ async function getTestQuestions(req, res) {
 
 async function startTest(req, res) {
   try {
-    // For MVP, fallback to body or hardcoded if missing
-    const userId = req.user?.id || req.body?.userId || 1;
-    const testSeriesId = req.body?.testSeriesId || req.body?.test_series_id || null;
-    const result = await testModel.startTestAttempt(userId, req.params.testId, testSeriesId);
+    const userId = req.user?.userId || req.user?.id || req.body?.userId || 1;
+    const result = await studentDashboardModel.validateAndStartTest(
+      userId,
+      req.params.testId,
+      req.body || {}
+    );
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    const status = error.status || 500;
+    const payload = {
+      error: error.message,
+      message: error.message,
+    };
+    if (error.code) payload.code = error.code;
+    if (error.conflictingAttemptId) payload.conflictingAttemptId = error.conflictingAttemptId;
+    if (error.conflictingTestId) payload.conflictingTestId = error.conflictingTestId;
+    if (error.details) payload.details = error.details;
+    res.status(status).json(payload);
   }
 }
 

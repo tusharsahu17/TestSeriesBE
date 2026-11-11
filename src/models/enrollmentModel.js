@@ -1,4 +1,5 @@
 const { createDbConnection } = require('../config/db');
+const notificationModel = require('./notificationModel');
 
 async function enrollStudent(data) {
   let connection;
@@ -23,7 +24,7 @@ async function enrollStudent(data) {
     }
 
     const [seriesRows] = await connection.query(
-      'SELECT id, is_paid, validity_days FROM test_series WHERE id = ?',
+      'SELECT id, title, is_paid, validity_days FROM test_series WHERE id = ?',
       [test_series_id]
     );
     if (seriesRows.length === 0) {
@@ -64,6 +65,26 @@ async function enrollStudent(data) {
     );
 
     await connection.commit();
+    if (!payment_id && status === 'ACTIVE') {
+      try {
+        await notificationModel.createNotification(
+          {
+            userId: user_id,
+            targetAudience: 'USER',
+            targetSeriesId: test_series_id,
+            type: 'PAYMENT_CONFIRMED',
+            title: 'Enrollment Confirmed',
+            message: `You have been enrolled in ${series.title || 'the test series'}.`,
+            referenceType: 'test_series',
+            referenceId: test_series_id,
+            dedupeKey: `enroll_confirmed:${result.insertId}`,
+          },
+          connection
+        );
+      } catch (notifErr) {
+        console.error('Failed to create enrollment notification:', notifErr.message);
+      }
+    }
     return result.insertId;
   } catch (error) {
     if (connection) await connection.rollback();

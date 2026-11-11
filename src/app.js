@@ -18,6 +18,7 @@ const examRoutes = require('./routes/examRoutes');
 const subjectRoutes = require('./routes/subjectRoutes');
 const testRoutes = require('./routes/testRoutes');
 const attemptRoutes = require('./routes/attemptRoutes');
+const userDashboardRoutes = require('./routes/userDashboardRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
@@ -35,6 +36,7 @@ app.use('/api/exams', examRoutes);
 app.use('/api/subjects', subjectRoutes);
 app.use('/api/tests', testRoutes);
 app.use('/api/attempts', attemptRoutes);
+app.use('/api/user', userDashboardRoutes);
 app.use('/api/upload', uploadRoutes);
 
 app.use('/api/admin/auth', adminRoutes);

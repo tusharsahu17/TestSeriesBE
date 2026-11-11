@@ -1,4 +1,5 @@
 const { createDbConnection } = require('../config/db');
+const notificationModel = require('./notificationModel');
 
 async function activatePaidAccess(connection, { paymentId, userId, testSeriesId, subscriptionId }) {
   if (testSeriesId) {
@@ -106,6 +107,15 @@ async function createPayment(data) {
     }
 
     await connection.commit();
+    if (status === 'SUCCESS') {
+      await notificationModel.notifyPaymentConfirmed(connection, {
+        userId: user_id,
+        paymentId,
+        testSeriesId: test_series_id,
+        amount,
+        currency,
+      });
+    }
     return paymentId;
   } catch (error) {
     if (connection) await connection.rollback();
@@ -158,6 +168,15 @@ async function updatePaymentStatus(id, data) {
     }
 
     await connection.commit();
+    if (status === 'SUCCESS') {
+      await notificationModel.notifyPaymentConfirmed(connection, {
+        userId: payment.user_id,
+        paymentId: id,
+        testSeriesId: payment.test_series_id,
+        amount: payment.amount,
+        currency: payment.currency || 'INR',
+      });
+    }
     return true;
   } catch (error) {
     if (connection) await connection.rollback();
