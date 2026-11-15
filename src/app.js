@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { createDbConnection } = require('./config/db');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/adminRoutes');
@@ -20,8 +21,16 @@ const testRoutes = require('./routes/testRoutes');
 const attemptRoutes = require('./routes/attemptRoutes');
 const userDashboardRoutes = require('./routes/userDashboardRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
+const pdfRoutes = require('./routes/pdfRoutes');
+const pdfCategoryRoutes = require('./routes/pdfCategoryRoutes');
+const { initPdfTables } = require('./config/initPdf');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
+
+// Ensure PDF tables exist automatically
+initPdfTables().catch(err => {
+  console.warn('PDF tables auto-init warning:', err.message);
+});
 
 const app = express();
 
@@ -31,6 +40,9 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Serve uploaded static files
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
 app.use('/api/auth', authRoutes);
 app.use('/api/exams', examRoutes);
 app.use('/api/subjects', subjectRoutes);
@@ -38,6 +50,12 @@ app.use('/api/tests', testRoutes);
 app.use('/api/attempts', attemptRoutes);
 app.use('/api/user', userDashboardRoutes);
 app.use('/api/upload', uploadRoutes);
+
+// PDF and Category Routes
+app.use('/api/pdfs', pdfRoutes);
+app.use('/api/pdf-categories', pdfCategoryRoutes);
+app.use('/api/admin/pdfs', pdfRoutes);
+app.use('/api/admin/pdf-categories', pdfCategoryRoutes);
 
 app.use('/api/admin/auth', adminRoutes);
 app.use('/api/admin/users', adminUserRoutes);
