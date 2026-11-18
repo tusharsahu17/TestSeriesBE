@@ -65,7 +65,6 @@ function resolveDateRangeFilter(filters = {}) {
     range: range || 'all',
     dateFrom,
     dateTo,
-    testSeriesId: parsePositiveInt(filters.testSeriesId ?? filters.test_series_id),
     subject: filters.subject ? String(filters.subject).trim() : null,
   };
 }
@@ -362,16 +361,10 @@ async function loadEvaluatedAttemptsWithMetrics(connection, userId, rawFilters =
     conditions.push('DATE(COALESCE(ta.submitted_at, ta.started_at, ta.created_at)) <= ?');
     params.push(filters.dateTo);
   }
-  if (filters.testSeriesId) {
-    conditions.push(
-      '(ta.test_series_id = ? OR EXISTS (SELECT 1 FROM test_series_tests tst_f WHERE tst_f.test_id = ta.test_id AND tst_f.test_series_id = ?))'
-    );
-    params.push(filters.testSeriesId, filters.testSeriesId);
-  }
   if (rawFilters.search && String(rawFilters.search).trim()) {
     const like = `%${String(rawFilters.search).trim()}%`;
-    conditions.push('(t.name LIKE ? OR ts.title LIKE ? OR s.name LIKE ?)');
-    params.push(like, like, like);
+    conditions.push('(t.name LIKE ? OR s.name LIKE ?)');
+    params.push(like, like);
   }
 
   const [attemptRows] = await connection.query(
@@ -384,19 +377,10 @@ async function loadEvaluatedAttemptsWithMetrics(connection, userId, rawFilters =
        t.passing_marks,
        t.negative_marking AS test_negative_marking,
        COALESCE(s.name, 'General') AS test_subject_name,
-       COALESCE(
-         ta.test_series_id,
-         (SELECT tst2.test_series_id FROM test_series_tests tst2 WHERE tst2.test_id = ta.test_id ORDER BY tst2.display_order ASC, tst2.test_series_id ASC LIMIT 1)
-       ) AS resolved_series_id,
-       COALESCE(
-         ts.title,
-         (SELECT ts2.title FROM test_series_tests tst2 JOIN test_series ts2 ON tst2.test_series_id = ts2.id WHERE tst2.test_id = ta.test_id ORDER BY tst2.display_order ASC, tst2.test_series_id ASC LIMIT 1)
-       ) AS test_series_title,
        COALESCE(ta.submitted_at, ta.started_at, ta.created_at) AS evaluated_at
      FROM test_attempts ta
      LEFT JOIN tests t ON t.id = ta.test_id
      LEFT JOIN subjects s ON s.id = t.subject_id
-     LEFT JOIN test_series ts ON ts.id = ta.test_series_id
      WHERE ${conditions.join(' AND ')}
      ORDER BY COALESCE(ta.submitted_at, ta.started_at, ta.created_at) DESC, ta.id DESC`,
     params
@@ -443,8 +427,8 @@ async function loadEvaluatedAttemptsWithMetrics(connection, userId, rawFilters =
       attemptId: attempt.id,
       testId: attempt.test_id,
       testName: attempt.test_name,
-      testSeriesId: attempt.resolved_series_id || null,
-      testSeriesTitle: attempt.test_series_title || null,
+      testSeriesId: null,
+      testSeriesTitle: null,
       subjectName: attempt.test_subject_name,
       durationMinutes: attempt.duration_minutes ?? null,
       status: attempt.status,
@@ -466,35 +450,7 @@ async function loadEvaluatedAttemptsWithMetrics(connection, userId, rawFilters =
 }
 
 async function getActiveTestSeriesCount(connection, userId) {
-  const [[row]] = await connection.query(
-    `SELECT COUNT(DISTINCT series_id) AS activeCount
-     FROM (
-       SELECT e.test_series_id AS series_id
-       FROM test_series_enrollments e
-       JOIN test_series ts ON ts.id = e.test_series_id
-       LEFT JOIN payments p ON p.id = e.payment_id
-       WHERE e.user_id = ?
-         AND ts.is_archived = 0
-         AND ts.is_published = 1
-         AND (ts.end_date IS NULL OR ts.end_date > NOW())
-         AND e.status = 'ACTIVE'
-         AND (e.expires_at IS NULL OR e.expires_at > NOW())
-         AND (p.id IS NULL OR p.status NOT IN ('PENDING', 'FAILED', 'REFUNDED'))
-       UNION
-       SELECT sub.test_series_id AS series_id
-       FROM subscriptions sub
-       JOIN test_series ts ON ts.id = sub.test_series_id
-       WHERE sub.user_id = ?
-         AND sub.test_series_id IS NOT NULL
-         AND ts.is_archived = 0
-         AND ts.is_published = 1
-         AND (ts.end_date IS NULL OR ts.end_date > NOW())
-         AND sub.status = 'ACTIVE'
-         AND (sub.expires_at IS NULL OR sub.expires_at > NOW())
-     ) active_series`,
-    [userId, userId]
-  );
-  return toNumber(row?.activeCount);
+  return 0;
 }
 
 /**
@@ -608,386 +564,37 @@ const ACCESS_STATUS_PRIORITY = {
 };
 
 /**
- * Section 2: My Test Series
+ * Section 2: My Test Series (Removed / Deprecated)
  */
 async function getMyTestSeries(userId, options = {}, existingConnection = null) {
-  return withConnection(existingConnection, async (connection) => {
-    const { page, limit, offset } = parsePagination(options, 20, 100);
-    const statusFilter = options.status ? String(options.status).trim().toUpperCase() : 'ALL';
-    const searchFilter = options.search ? String(options.search).trim().toLowerCase() : '';
-
-    const [enrollmentRows] = await connection.query(
-      `SELECT
-         e.id AS enrollment_id,
-         e.test_series_id,
-         e.payment_id,
-         e.enrollment_type,
-         e.status,
-         e.enrolled_at,
-         e.expires_at,
-         ts.title,
-         ts.description,
-         ts.thumbnail_url,
-         ts.price,
-         ts.is_paid,
-         ts.validity_days,
-         ts.start_date AS series_start_date,
-         ts.end_date AS series_end_date,
-         ts.difficulty_level,
-         c.name AS category_name,
-         p.status AS payment_status,
-         p.paid_at,
-         p.amount AS paid_amount,
-         p.order_id,
-         (
-           SELECT COUNT(*)
-           FROM test_series_tests tst
-           JOIN tests t ON t.id = tst.test_id
-           WHERE tst.test_series_id = ts.id
-             AND t.is_published = 1
-             AND t.is_active = 1
-         ) AS total_tests,
-         (
-           SELECT COUNT(DISTINCT ta.test_id)
-           FROM test_attempts ta
-           JOIN test_series_tests tst2 ON tst2.test_id = ta.test_id AND tst2.test_series_id = ts.id
-           JOIN tests t2 ON t2.id = ta.test_id
-           WHERE ta.user_id = e.user_id
-             AND (ta.test_series_id = ts.id OR ta.test_series_id IS NULL)
-             AND UPPER(ta.status) IN ('COMPLETED', 'EVALUATED')
-             AND t2.is_published = 1
-             AND t2.is_active = 1
-         ) AS completed_tests
-       FROM test_series_enrollments e
-       JOIN test_series ts ON ts.id = e.test_series_id
-       LEFT JOIN categories c ON c.id = ts.category_id
-       LEFT JOIN payments p ON p.id = e.payment_id
-       WHERE e.user_id = ?
-         AND ts.is_archived = 0
-         AND ts.is_published = 1
-       ORDER BY e.enrolled_at DESC, e.id DESC`,
-      [userId]
-    );
-
-    // Also include pending payments that have not created an enrollment row yet
-    const [pendingPaymentRows] = await connection.query(
-      `SELECT
-         p.id AS payment_id,
-         p.test_series_id,
-         p.amount AS paid_amount,
-         p.status AS payment_status,
-         p.order_id,
-         p.created_at AS enrolled_at,
-         ts.title,
-         ts.description,
-         ts.thumbnail_url,
-         ts.price,
-         ts.is_paid,
-         ts.validity_days,
-         ts.start_date AS series_start_date,
-         ts.end_date AS series_end_date,
-         ts.difficulty_level,
-         c.name AS category_name,
-         (
-           SELECT COUNT(*)
-           FROM test_series_tests tst
-           JOIN tests t ON t.id = tst.test_id
-           WHERE tst.test_series_id = ts.id
-             AND t.is_published = 1
-             AND t.is_active = 1
-         ) AS total_tests,
-         0 AS completed_tests
-       FROM payments p
-       JOIN test_series ts ON ts.id = p.test_series_id
-       LEFT JOIN categories c ON c.id = ts.category_id
-       WHERE p.user_id = ?
-         AND p.test_series_id IS NOT NULL
-         AND p.status = 'PENDING'
-         AND ts.is_archived = 0
-         AND ts.is_published = 1
-         AND NOT EXISTS (
-           SELECT 1 FROM test_series_enrollments e2
-           WHERE e2.user_id = p.user_id AND e2.test_series_id = p.test_series_id
-         )
-       ORDER BY p.created_at DESC`,
-      [userId]
-    );
-
-    // Also include series-linked subscriptions if not already in enrollments
-    const [subscriptionRows] = await connection.query(
-      `SELECT
-         sub.id AS subscription_id,
-         sub.test_series_id,
-         sub.plan_name,
-         sub.status,
-         sub.starts_at AS enrolled_at,
-         sub.expires_at,
-         sub.amount AS paid_amount,
-         ts.title,
-         ts.description,
-         ts.thumbnail_url,
-         ts.price,
-         ts.is_paid,
-         ts.validity_days,
-         ts.start_date AS series_start_date,
-         ts.end_date AS series_end_date,
-         ts.difficulty_level,
-         c.name AS category_name,
-         (
-           SELECT COUNT(*)
-           FROM test_series_tests tst
-           JOIN tests t ON t.id = tst.test_id
-           WHERE tst.test_series_id = ts.id
-             AND t.is_published = 1
-             AND t.is_active = 1
-         ) AS total_tests,
-         (
-           SELECT COUNT(DISTINCT ta.test_id)
-           FROM test_attempts ta
-           JOIN test_series_tests tst2 ON tst2.test_id = ta.test_id AND tst2.test_series_id = ts.id
-           JOIN tests t2 ON t2.id = ta.test_id
-           WHERE ta.user_id = sub.user_id
-             AND (ta.test_series_id = ts.id OR ta.test_series_id IS NULL)
-             AND UPPER(ta.status) IN ('COMPLETED', 'EVALUATED')
-             AND t2.is_published = 1
-             AND t2.is_active = 1
-         ) AS completed_tests
-       FROM subscriptions sub
-       JOIN test_series ts ON ts.id = sub.test_series_id
-       LEFT JOIN categories c ON c.id = ts.category_id
-       WHERE sub.user_id = ?
-         AND sub.test_series_id IS NOT NULL
-         AND ts.is_archived = 0
-         AND ts.is_published = 1
-         AND NOT EXISTS (
-           SELECT 1 FROM test_series_enrollments e3
-           WHERE e3.user_id = sub.user_id AND e3.test_series_id = sub.test_series_id
-         )
-       ORDER BY sub.starts_at DESC`,
-      [userId]
-    );
-
-    const nowMs = Date.now();
-    const bySeriesId = new Map();
-
-    const mergeRecord = (record) => {
-      const existing = bySeriesId.get(record.testSeriesId);
-      if (!existing) {
-        bySeriesId.set(record.testSeriesId, record);
-        return;
-      }
-      const existingPrio = ACCESS_STATUS_PRIORITY[existing.accessStatus] || 0;
-      const newPrio = ACCESS_STATUS_PRIORITY[record.accessStatus] || 0;
-      if (newPrio > existingPrio) {
-        bySeriesId.set(record.testSeriesId, record);
-      }
-    };
-
-    for (const row of enrollmentRows) {
-      const { accessStatus, accessLabel, canAttempt } = resolveEnrollmentAccessStatus(row, nowMs);
-      const totalTests = toNumber(row.total_tests);
-      const completedTests = Math.min(toNumber(row.completed_tests), totalTests);
-      const remainingTests = Math.max(totalTests - completedTests, 0);
-      const progressPercentage = totalTests > 0 ? roundTwo((completedTests / totalTests) * 100) : 0;
-
-      mergeRecord({
-        enrollmentId: row.enrollment_id,
-        testSeriesId: row.test_series_id,
-        title: row.title,
-        description: row.description || null,
-        thumbnailUrl: row.thumbnail_url || null,
-        categoryName: row.category_name || null,
-        difficultyLevel: row.difficulty_level || null,
-        price: roundTwo(row.price),
-        isPaid: Boolean(row.is_paid),
-        enrollmentType: row.enrollment_type,
-        purchaseDate: row.paid_at || row.enrolled_at,
-        enrolledAt: row.enrolled_at,
-        expiresAt: row.expires_at || null,
-        totalTests,
-        completedTests,
-        remainingTests,
-        progressPercentage,
-        accessStatus,
-        accessLabel,
-        canAttempt,
-        paymentId: row.payment_id || null,
-        orderId: row.order_id || null,
-        paidAmount: row.paid_amount !== null && row.paid_amount !== undefined ? roundTwo(row.paid_amount) : null,
-        paymentStatus: row.payment_status || null,
-      });
-    }
-
-    for (const row of pendingPaymentRows) {
-      const totalTests = toNumber(row.total_tests);
-      mergeRecord({
-        enrollmentId: null,
-        testSeriesId: row.test_series_id,
-        title: row.title,
-        description: row.description || null,
-        thumbnailUrl: row.thumbnail_url || null,
-        categoryName: row.category_name || null,
-        difficultyLevel: row.difficulty_level || null,
-        price: roundTwo(row.price),
-        isPaid: Boolean(row.is_paid),
-        enrollmentType: 'PAID',
-        purchaseDate: row.enrolled_at,
-        enrolledAt: row.enrolled_at,
-        expiresAt: null,
-        totalTests,
-        completedTests: 0,
-        remainingTests: totalTests,
-        progressPercentage: 0,
-        accessStatus: 'PENDING',
-        accessLabel: 'Pending',
-        canAttempt: false,
-        paymentId: row.payment_id,
-        orderId: row.order_id || null,
-        paidAmount: roundTwo(row.paid_amount),
-        paymentStatus: row.payment_status,
-      });
-    }
-
-    for (const row of subscriptionRows) {
-      const { accessStatus, accessLabel, canAttempt } = resolveEnrollmentAccessStatus(row, nowMs);
-      const totalTests = toNumber(row.total_tests);
-      const completedTests = Math.min(toNumber(row.completed_tests), totalTests);
-      const remainingTests = Math.max(totalTests - completedTests, 0);
-      const progressPercentage = totalTests > 0 ? roundTwo((completedTests / totalTests) * 100) : 0;
-
-      mergeRecord({
-        enrollmentId: null,
-        subscriptionId: row.subscription_id,
-        testSeriesId: row.test_series_id,
-        title: row.title,
-        description: row.description || null,
-        thumbnailUrl: row.thumbnail_url || null,
-        categoryName: row.category_name || null,
-        difficultyLevel: row.difficulty_level || null,
-        price: roundTwo(row.price),
-        isPaid: Boolean(row.is_paid),
-        enrollmentType: 'PAID',
-        purchaseDate: row.enrolled_at,
-        enrolledAt: row.enrolled_at,
-        expiresAt: row.expires_at || null,
-        totalTests,
-        completedTests,
-        remainingTests,
-        progressPercentage,
-        accessStatus,
-        accessLabel,
-        canAttempt,
-        paymentId: null,
-        orderId: null,
-        paidAmount: roundTwo(row.paid_amount),
-        paymentStatus: 'SUCCESS',
-      });
-    }
-
-    const allSeries = Array.from(bySeriesId.values()).sort((a, b) => {
-      const prioDiff = (ACCESS_STATUS_PRIORITY[b.accessStatus] || 0) - (ACCESS_STATUS_PRIORITY[a.accessStatus] || 0);
-      if (prioDiff !== 0) return prioDiff;
-      return new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime();
-    });
-
-    const summary = {
-      total: allSeries.length,
-      active: allSeries.filter((s) => s.accessStatus === 'ACTIVE').length,
-      expired: allSeries.filter((s) => s.accessStatus === 'EXPIRED').length,
-      pending: allSeries.filter((s) => s.accessStatus === 'PENDING').length,
-      cancelled: allSeries.filter((s) => s.accessStatus === 'CANCELLED').length,
-    };
-
-    let filtered = allSeries;
-    if (statusFilter && statusFilter !== 'ALL') {
-      filtered = filtered.filter((s) => s.accessStatus === statusFilter);
-    }
-    if (searchFilter) {
-      filtered = filtered.filter(
-        (s) =>
-          (s.title && s.title.toLowerCase().includes(searchFilter)) ||
-          (s.categoryName && s.categoryName.toLowerCase().includes(searchFilter))
-      );
-    }
-
-    const total = filtered.length;
-    const items = filtered.slice(offset, offset + limit);
-
-    return {
-      items,
-      summary,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: total > 0 ? Math.ceil(total / limit) : 0,
-      },
-    };
-  });
+  const { page, limit } = parsePagination(options, 20, 100);
+  return {
+    items: [],
+    summary: {
+      total: 0,
+      active: 0,
+      expired: 0,
+      pending: 0,
+      cancelled: 0,
+    },
+    pagination: {
+      page,
+      limit,
+      total: 0,
+      totalPages: 0,
+    },
+  };
 }
 
 async function getStudentAccessContext(connection, userId) {
-  const [enrollments] = await connection.query(
-    `SELECT
-       e.id,
-       e.test_series_id,
-       e.status,
-       e.expires_at,
-       ts.title AS series_title,
-       ts.start_date AS series_start_date,
-       ts.end_date AS series_end_date,
-       p.status AS payment_status
-     FROM test_series_enrollments e
-     JOIN test_series ts ON ts.id = e.test_series_id
-     LEFT JOIN payments p ON p.id = e.payment_id
-     WHERE e.user_id = ? AND ts.is_archived = 0 AND ts.is_published = 1`,
-    [userId]
-  );
-
-  const [subscriptions] = await connection.query(
-    `SELECT id, plan_type, test_series_id, status, expires_at
-     FROM subscriptions
-     WHERE user_id = ?`,
-    [userId]
-  );
-
-  const nowMs = Date.now();
-  const activeSeriesIds = new Set();
-  const expiredSeriesIds = new Set();
-  const pendingSeriesIds = new Set();
-  let hasGlobalActiveSubscription = false;
-
-  for (const e of enrollments) {
-    const resolved = resolveEnrollmentAccessStatus(e, nowMs);
-    if (resolved.accessStatus === 'ACTIVE') {
-      activeSeriesIds.add(e.test_series_id);
-    } else if (resolved.accessStatus === 'PENDING') {
-      pendingSeriesIds.add(e.test_series_id);
-    } else if (resolved.accessStatus === 'EXPIRED') {
-      expiredSeriesIds.add(e.test_series_id);
-    }
-  }
-
-  for (const sub of subscriptions) {
-    const isSubActive =
-      String(sub.status).toUpperCase() === 'ACTIVE' &&
-      (!sub.expires_at || new Date(sub.expires_at).getTime() > nowMs);
-    if (!isSubActive) continue;
-
-    if (sub.test_series_id) {
-      activeSeriesIds.add(sub.test_series_id);
-    } else if (['MONTHLY', 'QUARTERLY', 'YEARLY', 'LIFETIME'].includes(String(sub.plan_type).toUpperCase())) {
-      hasGlobalActiveSubscription = true;
-    }
-  }
-
   return {
-    activeSeriesIds,
-    expiredSeriesIds,
-    pendingSeriesIds,
-    hasGlobalActiveSubscription,
+    activeSeriesIds: new Set(),
+    expiredSeriesIds: new Set(),
+    pendingSeriesIds: new Set(),
+    hasGlobalActiveSubscription: true,
   };
 }
+
 
 function buildTestAttemptStats(test, actualQuestions, attemptsForTest, accessCtx, linkedSeries, nowMs) {
   const questionCount = actualQuestions.length > 0 ? actualQuestions.length : toNumber(test.total_questions, 0);
@@ -1014,16 +621,8 @@ function buildTestAttemptStats(test, actualQuestions, attemptsForTest, accessCtx
   const maxAttempts = test.max_attempts !== null && test.max_attempts !== undefined ? toNumber(test.max_attempts, 0) : null;
   const attemptsRemaining = maxAttempts && maxAttempts > 0 ? Math.max(maxAttempts - attemptsUsed, 0) : null;
 
-  const isEnrolledActive = linkedSeries.some((s) => accessCtx.activeSeriesIds.has(s.id));
-  const isEnrolledExpired = !isEnrolledActive && linkedSeries.some((s) => accessCtx.expiredSeriesIds.has(s.id));
-  const isEnrolledPending = !isEnrolledActive && linkedSeries.some((s) => accessCtx.pendingSeriesIds.has(s.id));
-
-  let accessSource = 'NONE';
-  if (isEnrolledActive) accessSource = 'ENROLLED_SERIES';
-  else if (accessCtx.hasGlobalActiveSubscription) accessSource = 'SUBSCRIPTION';
-  else if (Boolean(test.is_free)) accessSource = 'FREE';
-
-  const hasAccess = accessSource !== 'NONE';
+  let accessSource = Boolean(test.is_free) ? 'FREE' : 'OPEN';
+  const hasAccess = true;
 
   const startTimeMs = test.start_time ? new Date(test.start_time).getTime() : null;
   const endTimeMs = test.end_time ? new Date(test.end_time).getTime() : null;
@@ -1041,15 +640,6 @@ function buildTestAttemptStats(test, actualQuestions, attemptsForTest, accessCtx
     canStart = false;
     cannotStartReason = 'Test is not published or currently unavailable';
     actionLabel = 'Unavailable';
-  } else if (!hasAccess) {
-    attemptStatus = isEnrolledExpired ? 'SERIES_EXPIRED' : isEnrolledPending ? 'ACCESS_PENDING' : 'LOCKED';
-    canStart = false;
-    cannotStartReason = isEnrolledExpired
-      ? 'Test series access has expired'
-      : isEnrolledPending
-        ? 'Payment confirmation pending'
-        : 'Purchase or enroll in the test series to unlock';
-    actionLabel = isEnrolledExpired ? 'Renew Series' : isEnrolledPending ? 'Pending' : 'Enroll to Unlock';
   } else if (isUpcoming) {
     attemptStatus = 'UPCOMING';
     canStart = false;
@@ -1095,7 +685,7 @@ function buildTestAttemptStats(test, actualQuestions, attemptsForTest, accessCtx
     bestPercentage,
     hasAccess,
     accessSource,
-    isFromPurchasedSeries: isEnrolledActive,
+    isFromPurchasedSeries: false,
     isUpcoming,
     isEnded,
     canStart,
@@ -1105,84 +695,10 @@ function buildTestAttemptStats(test, actualQuestions, attemptsForTest, accessCtx
 }
 
 /**
- * Section 2 Detail: Single Test Series details + tests for logged-in student
+ * Section 2 Detail: Single Test Series details (Removed / Deprecated)
  */
 async function getStudentTestSeriesDetail(userId, seriesId, existingConnection = null) {
-  return withConnection(existingConnection, async (connection) => {
-    const mySeriesResult = await getMyTestSeries(userId, { page: 1, limit: 1000 }, connection);
-    const enrollment = mySeriesResult.items.find((item) => item.testSeriesId === Number(seriesId)) || null;
-
-    const [seriesRows] = await connection.query(
-      `SELECT ts.*, c.name AS category_name
-       FROM test_series ts
-       LEFT JOIN categories c ON c.id = ts.category_id
-       WHERE ts.id = ? AND ts.is_archived = 0 AND ts.is_published = 1`,
-      [seriesId]
-    );
-    if (seriesRows.length === 0) return null;
-    const series = seriesRows[0];
-
-    if (!enrollment) {
-      return null;
-    }
-
-    const [tests] = await connection.query(
-      `SELECT t.*, s.name AS subject_name, tst.display_order AS series_display_order
-       FROM test_series_tests tst
-       JOIN tests t ON t.id = tst.test_id
-       LEFT JOIN subjects s ON s.id = t.subject_id
-       WHERE tst.test_series_id = ?
-         AND t.is_published = 1
-         AND t.is_active = 1
-       ORDER BY tst.display_order ASC, t.id ASC`,
-      [seriesId]
-    );
-
-    const testIds = tests.map((t) => t.id);
-    const questionsMap = await loadTestQuestionsMap(connection, testIds);
-    const accessCtx = await getStudentAccessContext(connection, userId);
-
-    const attemptsByTest = new Map();
-    if (testIds.length > 0) {
-      const [attemptRows] = await connection.query(
-        `SELECT id, test_id, status, percentage, obtained_marks, total_marks, started_at, submitted_at
-         FROM test_attempts
-         WHERE user_id = ? AND test_id IN (?)
-         ORDER BY COALESCE(submitted_at, started_at) DESC, id DESC`,
-        [userId, testIds]
-      );
-      for (const a of attemptRows) {
-        if (!attemptsByTest.has(a.test_id)) attemptsByTest.set(a.test_id, []);
-        attemptsByTest.get(a.test_id).push(a);
-      }
-    }
-
-    const nowMs = Date.now();
-    const mappedTests = tests.map((t) => {
-      const qList = questionsMap.get(t.id) || [];
-      const tAttempts = attemptsByTest.get(t.id) || [];
-      const stats = buildTestAttemptStats(t, qList, tAttempts, accessCtx, [series], nowMs);
-      return {
-        id: t.id,
-        name: t.name,
-        description: t.description || null,
-        subjectName: t.subject_name || 'General',
-        difficulty: t.difficulty || null,
-        testType: t.test_type || null,
-        durationMinutes: t.duration_minutes ?? 0,
-        passingMarks: t.passing_marks ?? null,
-        startTime: t.start_time || null,
-        endTime: t.end_time || null,
-        isFree: Boolean(t.is_free),
-        ...stats,
-      };
-    });
-
-    return {
-      series: enrollment,
-      tests: mappedTests,
-    };
-  });
+  return null;
 }
 
 /**
@@ -1193,7 +709,6 @@ async function getAvailableTests(userId, options = {}, existingConnection = null
     const { page, limit, offset } = parsePagination(options, 20, 100);
     const includeLocked = String(options.includeLocked || '').toLowerCase() === 'true';
     const bucketFilter = options.bucket ? String(options.bucket).trim().toLowerCase() : 'all';
-    const seriesIdFilter = parsePositiveInt(options.testSeriesId ?? options.test_series_id);
     const searchFilter = options.search ? String(options.search).trim().toLowerCase() : '';
 
     const accessCtx = await getStudentAccessContext(connection, userId);
@@ -1244,29 +759,6 @@ async function getAvailableTests(userId, options = {}, existingConnection = null
     const testIds = testRows.map((t) => t.id);
     const questionsMap = await loadTestQuestionsMap(connection, testIds);
 
-    const [seriesLinks] = await connection.query(
-      `SELECT
-         tst.test_id,
-         ts.id,
-         ts.title,
-         ts.is_paid,
-         ts.start_date AS series_start_date,
-         ts.end_date AS series_end_date
-       FROM test_series_tests tst
-       JOIN test_series ts ON ts.id = tst.test_series_id
-       WHERE tst.test_id IN (?)
-         AND ts.is_published = 1
-         AND ts.is_archived = 0
-       ORDER BY tst.display_order ASC, ts.id ASC`,
-      [testIds]
-    );
-
-    const seriesByTestId = new Map();
-    for (const link of seriesLinks) {
-      if (!seriesByTestId.has(link.test_id)) seriesByTestId.set(link.test_id, []);
-      seriesByTestId.get(link.test_id).push(link);
-    }
-
     const [attemptRows] = await connection.query(
       `SELECT id, test_id, status, percentage, obtained_marks, total_marks, started_at, submitted_at
        FROM test_attempts
@@ -1286,31 +778,22 @@ async function getAvailableTests(userId, options = {}, existingConnection = null
 
     const allCards = [];
     for (const test of testRows) {
-      const linkedSeries = seriesByTestId.get(test.id) || [];
-      const enrolledSeries = linkedSeries.find((s) => accessCtx.activeSeriesIds.has(s.id)) || null;
-      const primarySeries = enrolledSeries || linkedSeries[0] || null;
-
-      if (seriesIdFilter && !linkedSeries.some((s) => s.id === seriesIdFilter)) {
-        continue;
-      }
-
       const qList = questionsMap.get(test.id) || [];
       const tAttempts = attemptsByTestId.get(test.id) || [];
-      const stats = buildTestAttemptStats(test, qList, tAttempts, accessCtx, linkedSeries, nowMs);
+      const stats = buildTestAttemptStats(test, qList, tAttempts, accessCtx, [], nowMs);
 
       if (!includeLocked && !stats.hasAccess) {
         continue;
       }
 
       if (searchFilter) {
-        const hay = `${test.name || ''} ${primarySeries?.title || ''} ${test.subject_name || ''}`.toLowerCase();
+        const hay = `${test.name || ''} ${test.subject_name || ''}`.toLowerCase();
         if (!hay.includes(searchFilter)) continue;
       }
 
       const createdAtMs = test.created_at ? new Date(test.created_at).getTime() : 0;
       const isNew = Boolean(createdAtMs && nowMs - createdAtMs <= fourteenDaysMs);
       const isFree = Boolean(test.is_free);
-      const isFromPurchasedSeries = stats.isFromPurchasedSeries;
 
       const testSubjectLower = String(test.subject_name || '').toLowerCase();
       const questionSubjects = new Set(
@@ -1324,12 +807,11 @@ async function getAvailableTests(userId, options = {}, existingConnection = null
       const isRecommended =
         stats.hasAccess &&
         !stats.isEnded &&
-        (matchesWeakSubject || (isUnattempted && (isFromPurchasedSeries || isFree)));
+        (matchesWeakSubject || (isUnattempted && isFree));
 
       const tags = [];
       if (stats.isUpcoming) tags.push('UPCOMING');
       if (isNew) tags.push('NEW');
-      if (isFromPurchasedSeries) tags.push('PURCHASED_SERIES');
       if (isFree) tags.push('FREE');
       if (isRecommended) tags.push('RECOMMENDED');
 
@@ -1337,8 +819,8 @@ async function getAvailableTests(userId, options = {}, existingConnection = null
         id: test.id,
         name: test.name,
         description: test.description || null,
-        testSeriesId: primarySeries ? primarySeries.id : null,
-        testSeriesTitle: primarySeries ? primarySeries.title : null,
+        testSeriesId: null,
+        testSeriesTitle: null,
         subjectId: test.subject_id,
         subjectName: test.subject_name || 'General',
         difficulty: test.difficulty || null,
@@ -1361,7 +843,6 @@ async function getAvailableTests(userId, options = {}, existingConnection = null
     allCards.sort((a, b) => {
       const score = (c) => {
         if (c.attemptStatus === 'IN_PROGRESS') return 6;
-        if (c.canStart && c.isFromPurchasedSeries) return 5;
         if (c.canStart && c.isRecommended) return 4;
         if (c.canStart) return 3;
         if (c.isUpcoming) return 2;
@@ -1421,8 +902,6 @@ async function validateAndStartTest(userId, rawTestId, options = {}) {
     throw err;
   }
 
-  const requestedSeriesId = parsePositiveInt(options.testSeriesId ?? options.test_series_id);
-
   return withConnection(null, async (connection) => {
     await connection.beginTransaction();
     try {
@@ -1461,70 +940,7 @@ async function validateAndStartTest(userId, rawTestId, options = {}) {
         throw err;
       }
 
-      const [linkedSeries] = await connection.query(
-        `SELECT ts.id, ts.title, ts.is_paid, ts.is_published, ts.is_archived, ts.start_date, ts.end_date
-         FROM test_series_tests tst
-         JOIN test_series ts ON ts.id = tst.test_series_id
-         WHERE tst.test_id = ?`,
-        [testId]
-      );
-
-      let resolvedSeries = null;
-      if (requestedSeriesId) {
-        resolvedSeries = linkedSeries.find((s) => s.id === requestedSeriesId) || null;
-        if (!resolvedSeries || !resolvedSeries.is_published || resolvedSeries.is_archived) {
-          const err = new Error('Test is not available in the requested test series');
-          err.status = 404;
-          err.code = 'SERIES_TEST_NOT_FOUND';
-          throw err;
-        }
-      }
-
-      // 2. Validate student access or free-test eligibility
-      const accessCtx = await getStudentAccessContext(connection, userId);
-      const activeLinkedSeries = linkedSeries.find(
-        (s) => s.is_published && !s.is_archived && accessCtx.activeSeriesIds.has(s.id)
-      );
-      if (!resolvedSeries && activeLinkedSeries) {
-        resolvedSeries = activeLinkedSeries;
-      }
-
-      const hasRequestedSeriesAccess = requestedSeriesId
-        ? accessCtx.activeSeriesIds.has(requestedSeriesId) || accessCtx.hasGlobalActiveSubscription
-        : false;
-      const hasAnySeriesAccess = Boolean(activeLinkedSeries) || accessCtx.hasGlobalActiveSubscription;
-
-      if (requestedSeriesId && !hasRequestedSeriesAccess && !test.is_free) {
-        const isExpired = accessCtx.expiredSeriesIds.has(requestedSeriesId);
-        const isPending = accessCtx.pendingSeriesIds.has(requestedSeriesId);
-        const err = new Error(
-          isExpired
-            ? 'Your test series access has expired'
-            : isPending
-              ? 'Your enrollment payment is pending confirmation'
-              : 'You do not have active access to this test series'
-        );
-        err.status = 403;
-        err.code = isExpired ? 'SERIES_ACCESS_EXPIRED' : isPending ? 'ACCESS_PENDING' : 'ACCESS_DENIED';
-        throw err;
-      }
-
-      if (!test.is_free && !hasAnySeriesAccess) {
-        const hasExpired = linkedSeries.some((s) => accessCtx.expiredSeriesIds.has(s.id));
-        const hasPending = linkedSeries.some((s) => accessCtx.pendingSeriesIds.has(s.id));
-        const err = new Error(
-          hasExpired
-            ? 'Your test series access has expired'
-            : hasPending
-              ? 'Your enrollment payment is pending confirmation'
-              : 'Enrollment or purchase is required to start this test'
-        );
-        err.status = 403;
-        err.code = hasExpired ? 'SERIES_ACCESS_EXPIRED' : hasPending ? 'ACCESS_PENDING' : 'ACCESS_DENIED';
-        throw err;
-      }
-
-      // 3. Validate test schedule (and series schedule if applicable)
+      // 2. Validate test schedule
       const nowMs = Date.now();
       if (test.start_time && new Date(test.start_time).getTime() > nowMs) {
         const err = new Error('Test has not started yet');
@@ -1539,20 +955,6 @@ async function validateAndStartTest(userId, rawTestId, options = {}) {
         err.code = 'TEST_ENDED';
         err.details = { endTime: test.end_time };
         throw err;
-      }
-      if (resolvedSeries) {
-        if (resolvedSeries.start_date && new Date(resolvedSeries.start_date).getTime() > nowMs) {
-          const err = new Error('Test series has not started yet');
-          err.status = 400;
-          err.code = 'SERIES_NOT_STARTED';
-          throw err;
-        }
-        if (resolvedSeries.end_date && new Date(resolvedSeries.end_date).getTime() < nowMs) {
-          const err = new Error('Test series has ended');
-          err.status = 400;
-          err.code = 'SERIES_ENDED';
-          throw err;
-        }
       }
 
       // 5 (checked alongside 4). Validate no conflicting active attempt
@@ -1629,12 +1031,10 @@ async function validateAndStartTest(userId, rawTestId, options = {}) {
             )
           : toNumber(test.total_marks, 0);
 
-      const finalSeriesId = resolvedSeries ? resolvedSeries.id : null;
-
       const [insertResult] = await connection.query(
-        `INSERT INTO test_attempts (user_id, test_id, test_series_id, total_questions, total_marks, status)
-         VALUES (?, ?, ?, ?, ?, 'IN_PROGRESS')`,
-        [userId, testId, finalSeriesId, totalQuestions, totalMarks]
+        `INSERT INTO test_attempts (user_id, test_id, total_questions, total_marks, status)
+         VALUES (?, ?, ?, ?, 'IN_PROGRESS')`,
+        [userId, testId, totalQuestions, totalMarks]
       );
 
       await connection.query('UPDATE users SET last_active_at = NOW() WHERE id = ?', [userId]);
@@ -1644,7 +1044,7 @@ async function validateAndStartTest(userId, rawTestId, options = {}) {
           userId,
           'TEST_START',
           testId,
-          JSON.stringify({ attemptId: insertResult.insertId, testSeriesId: finalSeriesId }),
+          JSON.stringify({ attemptId: insertResult.insertId }),
         ]
       );
 
@@ -1653,7 +1053,6 @@ async function validateAndStartTest(userId, rawTestId, options = {}) {
       return {
         attemptId: insertResult.insertId,
         testId,
-        testSeriesId: finalSeriesId,
         durationMinutes: toNumber(test.duration_minutes, 0),
         totalQuestions,
         totalMarks,
@@ -1788,19 +1187,10 @@ async function getAttemptResultDetail(userId, rawAttemptId) {
          t.total_marks AS test_total_marks,
          t.passing_marks,
          t.negative_marking AS test_negative_marking,
-         COALESCE(s.name, 'General') AS test_subject_name,
-         COALESCE(
-           ta.test_series_id,
-           (SELECT tst2.test_series_id FROM test_series_tests tst2 WHERE tst2.test_id = ta.test_id ORDER BY tst2.display_order ASC, tst2.test_series_id ASC LIMIT 1)
-         ) AS resolved_series_id,
-         COALESCE(
-           ts.title,
-           (SELECT ts2.title FROM test_series_tests tst2 JOIN test_series ts2 ON tst2.test_series_id = ts2.id WHERE tst2.test_id = ta.test_id ORDER BY tst2.display_order ASC, tst2.test_series_id ASC LIMIT 1)
-         ) AS test_series_title
+         COALESCE(s.name, 'General') AS test_subject_name
        FROM test_attempts ta
        LEFT JOIN tests t ON t.id = ta.test_id
        LEFT JOIN subjects s ON s.id = t.subject_id
-       LEFT JOIN test_series ts ON ts.id = ta.test_series_id
        WHERE ta.id = ? AND ta.user_id = ?`,
       [attemptId, userId]
     );
@@ -1911,8 +1301,8 @@ async function getAttemptResultDetail(userId, rawAttemptId) {
         attemptId: attempt.id,
         testId: attempt.test_id,
         testName: attempt.test_name,
-        testSeriesId: attempt.resolved_series_id || null,
-        testSeriesTitle: attempt.test_series_title || null,
+        testSeriesId: null,
+        testSeriesTitle: null,
         subjectName: attempt.test_subject_name,
         durationMinutes: attempt.duration_minutes ?? null,
         status: attempt.status,
@@ -2097,11 +1487,6 @@ async function getFullDashboard(userId, options = {}) {
 
   return withConnection(null, async (connection) => {
     const summary = await getDashboardSummary(userId, connection);
-    const testSeries = await getMyTestSeries(
-      userId,
-      { page: 1, limit: options.seriesLimit || 6 },
-      connection
-    );
     const availableTests = await getAvailableTests(
       userId,
       { page: 1, limit: options.testsLimit || 6 },
@@ -2117,7 +1502,10 @@ async function getFullDashboard(userId, options = {}) {
 
     return {
       summary,
-      testSeries,
+      testSeries: {
+        items: [],
+        pagination: { page: 1, limit: 0, total: 0, totalPages: 0 },
+      },
       availableTests,
       recentAttempts,
       performance,

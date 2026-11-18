@@ -43,17 +43,6 @@ function buildVisibilityClause(alias = 'n') {
   return `(
     ${alias}.user_id = ?
     OR (${alias}.user_id IS NULL AND ${alias}.target_audience = 'ALL_STUDENTS')
-    OR (
-      ${alias}.user_id IS NULL
-      AND ${alias}.target_audience = 'SERIES_ENROLLED'
-      AND EXISTS (
-        SELECT 1
-        FROM test_series_enrollments tse_notif
-        WHERE tse_notif.user_id = ?
-          AND tse_notif.test_series_id = ${alias}.target_series_id
-          AND tse_notif.status != 'CANCELLED'
-      )
-    )
   ) AND (${alias}.expires_at IS NULL OR ${alias}.expires_at > NOW())`;
 }
 
@@ -118,52 +107,7 @@ async function createNotification(payload = {}, existingConnection = null) {
 }
 
 async function syncExpiringSeriesNotifications(connection, userId) {
-  const [expiringRows] = await connection.query(
-    `SELECT
-       e.id AS enrollment_id,
-       e.test_series_id,
-       e.expires_at,
-       ts.title AS series_title
-     FROM test_series_enrollments e
-     JOIN test_series ts ON ts.id = e.test_series_id
-     WHERE e.user_id = ?
-       AND e.status = 'ACTIVE'
-       AND ts.is_archived = 0
-       AND e.expires_at IS NOT NULL
-       AND e.expires_at > NOW()
-       AND e.expires_at <= DATE_ADD(NOW(), INTERVAL 7 DAY)`,
-    [userId]
-  );
-
-  for (const row of expiringRows) {
-    const expiresDate = new Date(row.expires_at);
-    const diffMs = expiresDate.getTime() - Date.now();
-    const daysLeft = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-    const expiryKeyDate = expiresDate.toISOString().slice(0, 10);
-    const dedupeKey = `series_expiring:${row.enrollment_id}:${expiryKeyDate}`;
-
-    await createNotification(
-      {
-        userId,
-        targetAudience: 'USER',
-        targetSeriesId: row.test_series_id,
-        type: 'SERIES_EXPIRING',
-        title: 'Test Series Expiring',
-        message: `${row.series_title} expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`,
-        referenceType: 'test_series',
-        referenceId: row.test_series_id,
-        metadata: {
-          enrollmentId: row.enrollment_id,
-          testSeriesId: row.test_series_id,
-          seriesTitle: row.series_title,
-          expiresAt: row.expires_at,
-          daysLeft,
-        },
-        dedupeKey,
-      },
-      connection
-    );
-  }
+  return;
 }
 
 async function getUnreadCount(connection, userId) {
@@ -178,7 +122,7 @@ async function getUnreadCount(connection, userId) {
          (n.user_id IS NOT NULL AND n.is_read = 0)
          OR (n.user_id IS NULL AND nr.id IS NULL)
        )`,
-    [userId, userId, userId]
+    [userId, userId]
   );
   return toNumber(row?.unreadCount);
 }
@@ -197,7 +141,7 @@ async function getUserNotifications(userId, options = {}, existingConnection = n
 
     const visibilitySql = buildVisibilityClause('n');
     const conditions = [visibilitySql];
-    const params = [userId, userId];
+    const params = [userId];
 
     if (options.type && String(options.type).trim() && String(options.type).toUpperCase() !== 'ALL') {
       const upperType = String(options.type).trim().toUpperCase();
@@ -295,7 +239,7 @@ async function markNotificationAsRead(userId, notificationId) {
       `SELECT n.id, n.user_id
        FROM notifications n
        WHERE n.id = ? AND ${visibilitySql}`,
-      [notificationId, userId, userId]
+      [notificationId, userId]
     );
 
     if (rows.length === 0) {
@@ -347,7 +291,7 @@ async function markAllNotificationsAsRead(userId) {
          WHERE n.user_id IS NULL
            AND nr.id IS NULL
            AND ${visibilitySql}`,
-        [userId, userId, userId, userId]
+        [userId, userId, userId]
       );
 
       await connection.commit();
@@ -374,55 +318,22 @@ async function notifyNewTestPublished(connection, testId) {
     const test = testRows[0];
     if (!test.is_published || !test.is_active) return;
 
-    const [seriesRows] = await connection.query(
-      `SELECT ts.id, ts.title, ts.is_paid
-       FROM test_series_tests tst
-       JOIN test_series ts ON ts.id = tst.test_series_id
-       WHERE tst.test_id = ? AND ts.is_published = 1 AND ts.is_archived = 0`,
-      [testId]
-    );
-
-    if (seriesRows.length > 0 && !test.is_free) {
-      for (const s of seriesRows) {
-        await createNotification(
-          {
-            targetAudience: 'SERIES_ENROLLED',
-            targetSeriesId: s.id,
-            type: 'NEW_TEST',
-            title: 'New Test Available',
-            message: `${test.name} is now available in ${s.title}.`,
-            referenceType: 'test',
-            referenceId: test.id,
-            metadata: { testId: test.id, testName: test.name, testSeriesId: s.id, seriesTitle: s.title },
-            dedupeKey: `new_test:${test.id}:series:${s.id}`,
-          },
-          connection
-        );
-      }
-    } else {
-      const seriesContext = seriesRows[0] || null;
-      await createNotification(
-        {
-          targetAudience: 'ALL_STUDENTS',
-          targetSeriesId: seriesContext ? seriesContext.id : null,
-          type: 'NEW_TEST',
-          title: 'New Test Available',
-          message: seriesContext
-            ? `${test.name} (${seriesContext.title}) is now available.`
-            : `${test.name} is now available.`,
-          referenceType: 'test',
-          referenceId: test.id,
-          metadata: {
-            testId: test.id,
-            testName: test.name,
-            testSeriesId: seriesContext ? seriesContext.id : null,
-            seriesTitle: seriesContext ? seriesContext.title : null,
-          },
-          dedupeKey: `new_test:${test.id}:all`,
+    await createNotification(
+      {
+        targetAudience: 'ALL_STUDENTS',
+        type: 'NEW_TEST',
+        title: 'New Test Available',
+        message: `${test.name} is now available.`,
+        referenceType: 'test',
+        referenceId: test.id,
+        metadata: {
+          testId: test.id,
+          testName: test.name,
         },
-        connection
-      );
-    }
+        dedupeKey: `new_test:${test.id}:all`,
+      },
+      connection
+    );
   } catch (err) {
     console.error('Failed to create new test notification:', err.message);
   }
@@ -466,28 +377,19 @@ async function notifyResultPublished(connection, attemptId) {
   }
 }
 
-async function notifyPaymentConfirmed(connection, { userId, paymentId, testSeriesId, amount, currency = 'INR' }) {
+async function notifyPaymentConfirmed(connection, { userId, paymentId, amount, currency = 'INR' }) {
   try {
-    let seriesTitle = 'your test series';
-    if (testSeriesId) {
-      const [sRows] = await connection.query('SELECT title FROM test_series WHERE id = ?', [testSeriesId]);
-      if (sRows.length > 0) seriesTitle = sRows[0].title;
-    }
-
     await createNotification(
       {
         userId,
         targetAudience: 'USER',
-        targetSeriesId: testSeriesId || null,
         type: 'PAYMENT_CONFIRMED',
         title: 'Payment Confirmed',
-        message: `Payment of ${currency} ${toNumber(amount)} confirmed for ${seriesTitle}.`,
+        message: `Payment of ${currency} ${toNumber(amount)} confirmed.`,
         referenceType: 'payment',
         referenceId: paymentId,
         metadata: {
           paymentId,
-          testSeriesId: testSeriesId || null,
-          seriesTitle,
           amount: toNumber(amount),
           currency,
         },

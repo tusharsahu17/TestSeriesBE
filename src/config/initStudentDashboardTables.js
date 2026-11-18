@@ -3,6 +3,17 @@ const { createDbConnection } = require('./db');
 
 let ensurePromise = null;
 
+async function tableExists(connection, tableName) {
+  const [rows] = await connection.query(
+    `SELECT 1
+     FROM INFORMATION_SCHEMA.TABLES
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?`,
+    [tableName]
+  );
+  return rows.length > 0;
+}
+
 async function indexExists(connection, tableName, indexName) {
   const [rows] = await connection.query(
     `SELECT 1
@@ -52,8 +63,7 @@ async function initStudentDashboardTables(existingConnection = null) {
         INDEX idx_notifications_audience_created (target_audience, created_at),
         INDEX idx_notifications_series_created (target_series_id, created_at),
         INDEX idx_notifications_type_created (type, created_at),
-        CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        CONSTRAINT fk_notifications_series FOREIGN KEY (target_series_id) REFERENCES test_series(id) ON DELETE CASCADE
+        CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
@@ -70,30 +80,38 @@ async function initStudentDashboardTables(existingConnection = null) {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
-    await ensureIndex(
-      connection,
-      'test_attempts',
-      'idx_test_attempts_user_status_submitted',
-      'user_id, status, submitted_at'
-    );
-    await ensureIndex(
-      connection,
-      'test_series_enrollments',
-      'idx_enrollments_user_status_expires',
-      'user_id, status, expires_at'
-    );
-    await ensureIndex(
-      connection,
-      'test_series_tests',
-      'idx_tst_series_test',
-      'test_series_id, test_id'
-    );
-    await ensureIndex(
-      connection,
-      'test_questions',
-      'idx_test_questions_test_question',
-      'test_id, question_id'
-    );
+    if (await tableExists(connection, 'test_attempts')) {
+      await ensureIndex(
+        connection,
+        'test_attempts',
+        'idx_test_attempts_user_status_submitted',
+        'user_id, status, submitted_at'
+      );
+    }
+    if (await tableExists(connection, 'test_series_enrollments')) {
+      await ensureIndex(
+        connection,
+        'test_series_enrollments',
+        'idx_enrollments_user_status_expires',
+        'user_id, status, expires_at'
+      );
+    }
+    if (await tableExists(connection, 'test_series_tests')) {
+      await ensureIndex(
+        connection,
+        'test_series_tests',
+        'idx_tst_series_test',
+        'test_series_id, test_id'
+      );
+    }
+    if (await tableExists(connection, 'test_questions')) {
+      await ensureIndex(
+        connection,
+        'test_questions',
+        'idx_test_questions_test_question',
+        'test_id, question_id'
+      );
+    }
 
     console.log('Student dashboard tables initialized successfully.');
   } finally {

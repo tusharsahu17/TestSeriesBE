@@ -42,11 +42,6 @@ const router = express.Router();
  *         schema:
  *           type: integer
  *           default: 6
- *       - in: query
- *         name: seriesLimit
- *         schema:
- *           type: integer
- *           default: 50
  *     responses:
  *       200:
  *         description: Complete dashboard payload
@@ -118,26 +113,6 @@ router.get('/students', adminDashboardController.getStudentAnalytics);
  *         description: Server error
  */
 router.get('/tests', adminDashboardController.getTestAnalytics);
-
-/**
- * @swagger
- * /api/admin/dashboard/test-series:
- *   get:
- *     summary: Get test series performance table, highlights, and recently published series
- *     tags: [Admin - Dashboard]
- *     parameters:
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 50
- *     responses:
- *       200:
- *         description: Test series performance metrics
- *       500:
- *         description: Server error
- */
-router.get('/test-series', adminDashboardController.getTestSeriesPerformance);
 
 /**
  * @swagger

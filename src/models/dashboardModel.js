@@ -82,14 +82,11 @@ async function getOverviewStats(existingConnection = null) {
       WHERE role = 'student'
     `);
 
-    const [[seriesStats]] = await connection.query(`
-      SELECT
-        COUNT(*) AS totalTestSeries,
-        SUM(CASE WHEN YEAR(created_at) = YEAR(CURDATE()) AND MONTH(created_at) = MONTH(CURDATE()) THEN 1 ELSE 0 END) AS addedThisMonth,
-        SUM(CASE WHEN is_published = 1 THEN 1 ELSE 0 END) AS publishedCount
-      FROM test_series
-      WHERE is_archived = 0
-    `);
+    const seriesStats = {
+      totalTestSeries: 0,
+      addedThisMonth: 0,
+      publishedCount: 0,
+    };
 
     const [[testStats]] = await connection.query(`
       SELECT
@@ -206,7 +203,6 @@ async function getStudentAnalytics(options = {}, existingConnection = null) {
         ) THEN 1 ELSE 0 END) AS activeStudentsLast30Days,
         SUM(CASE WHEN (
           u.subscription_status = 'active'
-          OR EXISTS (SELECT 1 FROM test_series_enrollments tse WHERE tse.user_id = u.id AND tse.enrollment_type = 'PAID' AND tse.status = 'ACTIVE' AND (tse.expires_at IS NULL OR tse.expires_at > NOW()))
           OR EXISTS (SELECT 1 FROM subscriptions sub WHERE sub.user_id = u.id AND sub.status = 'ACTIVE' AND (sub.expires_at IS NULL OR sub.expires_at > NOW()))
           OR EXISTS (SELECT 1 FROM payments p WHERE p.user_id = u.id AND p.status = 'SUCCESS')
         ) THEN 1 ELSE 0 END) AS paidStudents
@@ -458,105 +454,17 @@ async function getTestAnalytics(options = {}, existingConnection = null) {
  * Section 4: Test Series Performance
  */
 async function getTestSeriesPerformance(options = {}, existingConnection = null) {
-  const limit = clampInt(options.limit, 50, 1, 200);
-
-  return withConnection(existingConnection, async (connection) => {
-    const [rows] = await connection.query(`
-      SELECT
-        ts.id,
-        ts.title,
-        ts.price,
-        ts.is_paid AS isPaid,
-        ts.is_published AS isPublished,
-        COALESCE(ts.published_at, ts.updated_at, ts.created_at) AS publishedAt,
-        ts.created_at AS createdAt,
-        COUNT(DISTINCT CASE WHEN e.status != 'CANCELLED' THEN e.user_id END) AS enrolledCount,
-        COUNT(DISTINCT ta.id) AS attemptsCount,
-        COUNT(DISTINCT CASE WHEN ta.status = 'COMPLETED' THEN ta.id END) AS completedAttemptsCount,
-        COALESCE(rev.totalRevenue, 0) AS totalRevenue
-      FROM test_series ts
-      LEFT JOIN test_series_enrollments e ON e.test_series_id = ts.id
-      LEFT JOIN test_series_tests tst ON tst.test_series_id = ts.id
-      LEFT JOIN test_attempts ta ON (
-        (ta.test_series_id IS NOT NULL AND ta.test_series_id = ts.id)
-        OR (ta.test_series_id IS NULL AND ta.test_id = tst.test_id)
-      )
-      LEFT JOIN (
-        SELECT test_series_id, COALESCE(SUM(amount - refund_amount), 0) AS totalRevenue
-        FROM payments
-        WHERE status = 'SUCCESS' AND test_series_id IS NOT NULL
-        GROUP BY test_series_id
-      ) rev ON rev.test_series_id = ts.id
-      WHERE ts.is_archived = 0
-      GROUP BY
-        ts.id, ts.title, ts.price, ts.is_paid, ts.is_published,
-        COALESCE(ts.published_at, ts.updated_at, ts.created_at),
-        ts.created_at, rev.totalRevenue
-      ORDER BY enrolledCount DESC, attemptsCount DESC, ts.id ASC
-    `);
-
-    const series = rows.map((row) => {
-      const enrolled = toNumber(row.enrolledCount);
-      const attempts = toNumber(row.attemptsCount);
-      const completed = toNumber(row.completedAttemptsCount);
-      return {
-        id: row.id,
-        title: row.title,
-        price: roundTwo(row.price),
-        isPaid: Boolean(row.isPaid),
-        isPublished: Boolean(row.isPublished),
-        publishedAt: row.isPublished ? row.publishedAt : null,
-        createdAt: row.createdAt,
-        enrolled,
-        attempts,
-        completedAttempts: completed,
-        completionRate: attempts > 0 ? roundTwo((completed / attempts) * 100) : 0,
-        totalRevenue: roundTwo(row.totalRevenue)
-      };
-    });
-
-    const publishedSeries = series.filter((s) => s.isPublished);
-    const pool = publishedSeries.length > 0 ? publishedSeries : series;
-
-    const mostPopular =
-      pool.length > 0
-        ? [...pool].sort((a, b) => b.enrolled - a.enrolled || b.attempts - a.attempts)[0]
-        : null;
-
-    const leastPopular =
-      pool.length > 0
-        ? [...pool].sort((a, b) => a.enrolled - b.enrolled || a.attempts - b.attempts)[0]
-        : null;
-
-    const highestRevenue =
-      series.length > 0
-        ? [...series].sort((a, b) => b.totalRevenue - a.totalRevenue || b.enrolled - a.enrolled)[0]
-        : null;
-
-    const seriesWithAttempts = series.filter((s) => s.attempts > 0);
-    const highestCompletionRate =
-      seriesWithAttempts.length > 0
-        ? [...seriesWithAttempts].sort(
-            (a, b) => b.completionRate - a.completionRate || b.completedAttempts - a.completedAttempts
-          )[0]
-        : null;
-
-    const recentlyPublishedSeries = [...publishedSeries]
-      .sort((a, b) => new Date(b.publishedAt || b.createdAt) - new Date(a.publishedAt || a.createdAt))
-      .slice(0, 5);
-
-    return {
-      series: series.slice(0, limit),
-      highlights: {
-        mostPopularTestSeries: mostPopular,
-        leastPopularTestSeries: leastPopular,
-        highestRevenueSeries: highestRevenue,
-        highestCompletionRateSeries: highestCompletionRate,
-        recentlyPublishedSeries: recentlyPublishedSeries[0] || null
-      },
-      recentlyPublishedSeries
-    };
-  });
+  return {
+    series: [],
+    highlights: {
+      mostPopularTestSeries: null,
+      leastPopularTestSeries: null,
+      highestRevenueSeries: null,
+      highestCompletionRateSeries: null,
+      recentlyPublishedSeries: null
+    },
+    recentlyPublishedSeries: []
+  };
 }
 
 /**
@@ -586,7 +494,7 @@ async function getRevenueAnalytics(options = {}, existingConnection = null) {
     const [[subscriptionCounts]] = await connection.query(`
       SELECT
         (SELECT COUNT(*) FROM subscriptions WHERE status = 'ACTIVE' AND (expires_at IS NULL OR expires_at > NOW())) AS activePlanSubscriptions,
-        (SELECT COUNT(*) FROM test_series_enrollments WHERE enrollment_type = 'PAID' AND status = 'ACTIVE' AND (expires_at IS NULL OR expires_at > NOW())) AS activePaidEnrollments
+        0 AS activePaidEnrollments
     `);
 
     const [monthlyRows] = await connection.query(

@@ -52,9 +52,7 @@ router.get('/subscriptions', adminPaymentController.listSubscriptions);
  *                 type: string
  *               plan_type:
  *                 type: string
- *                 enum: [MONTHLY, QUARTERLY, YEARLY, LIFETIME, SERIES_PASS]
- *               test_series_id:
- *                 type: integer
+ *                 enum: [MONTHLY, QUARTERLY, YEARLY, LIFETIME]
  *               amount:
  *                 type: number
  *               expires_at:
@@ -111,10 +109,6 @@ router.patch('/subscriptions/:id/status', adminPaymentController.updateSubscript
  *         name: user_id
  *         schema:
  *           type: integer
- *       - in: query
- *         name: test_series_id
- *         schema:
- *           type: integer
  *     responses:
  *       200:
  *         description: List of payments
@@ -125,7 +119,7 @@ router.get('/', adminPaymentController.listPayments);
  * @swagger
  * /api/admin/payments:
  *   post:
- *     summary: Record a payment transaction (auto-enrolls on SUCCESS when test_series_id is provided)
+ *     summary: Record a payment transaction
  *     tags: [Admin - Payments]
  *     requestBody:
  *       required: true
@@ -136,8 +130,6 @@ router.get('/', adminPaymentController.listPayments);
  *             required: [user_id, amount]
  *             properties:
  *               user_id:
- *                 type: integer
- *               test_series_id:
  *                 type: integer
  *               subscription_id:
  *                 type: integer
@@ -216,7 +208,7 @@ router.patch('/:id/status', adminPaymentController.updatePaymentStatus);
  * @swagger
  * /api/admin/payments/{id}/refund:
  *   post:
- *     summary: Refund a payment and cancel linked enrollment/subscription
+ *     summary: Refund a payment and cancel linked subscription
  *     tags: [Admin - Payments]
  *     parameters:
  *       - in: path
