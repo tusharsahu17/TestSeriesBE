@@ -710,6 +710,8 @@ async function getAvailableTests(userId, options = {}, existingConnection = null
     const includeLocked = String(options.includeLocked || '').toLowerCase() === 'true';
     const bucketFilter = options.bucket ? String(options.bucket).trim().toLowerCase() : 'all';
     const searchFilter = options.search ? String(options.search).trim().toLowerCase() : '';
+    const examId = options.exam_id || options.examId;
+    const subjectId = options.subject_id || options.subjectId;
 
     const accessCtx = await getStudentAccessContext(connection, userId);
 
@@ -730,17 +732,33 @@ async function getAvailableTests(userId, options = {}, existingConnection = null
       if (acc < 70) weakSubjects.add(subj.toLowerCase());
     }
 
-    const [testRows] = await connection.query(
-      `SELECT
+    let query = `
+      SELECT
          t.*,
-         s.name AS subject_name
+         s.name AS subject_name,
+         e.name AS exam_name
        FROM tests t
        LEFT JOIN subjects s ON s.id = t.subject_id
+       LEFT JOIN exams e ON e.id = t.exam_id
        WHERE t.is_published = 1
          AND t.is_active = 1
          AND (t.end_time IS NULL OR t.end_time >= NOW())
-       ORDER BY t.created_at DESC, t.id DESC`
-    );
+    `;
+    const queryParams = [];
+
+    if (examId) {
+      query += ' AND t.exam_id = ?';
+      queryParams.push(examId);
+    }
+
+    if (subjectId) {
+      query += ' AND t.subject_id = ?';
+      queryParams.push(subjectId);
+    }
+
+    query += ' ORDER BY t.created_at DESC, t.id DESC';
+
+    const [testRows] = await connection.query(query, queryParams);
 
     if (testRows.length === 0) {
       return {
@@ -821,6 +839,10 @@ async function getAvailableTests(userId, options = {}, existingConnection = null
         description: test.description || null,
         testSeriesId: null,
         testSeriesTitle: null,
+        examId: test.exam_id || null,
+        exam_id: test.exam_id || null,
+        examName: test.exam_name || null,
+        exam_name: test.exam_name || null,
         subjectId: test.subject_id,
         subjectName: test.subject_name || 'General',
         difficulty: test.difficulty || null,
@@ -1489,7 +1511,13 @@ async function getFullDashboard(userId, options = {}) {
     const summary = await getDashboardSummary(userId, connection);
     const availableTests = await getAvailableTests(
       userId,
-      { page: 1, limit: options.testsLimit || 6 },
+      {
+        page: 1,
+        limit: options.testsLimit || 6,
+        exam_id: options.exam_id || options.examId,
+        bucket: options.bucket,
+        search: options.search,
+      },
       connection
     );
     const recentAttempts = await getRecentAttempts(userId, { limit: 5 }, connection);

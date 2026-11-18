@@ -124,12 +124,21 @@ async function getAllQuestions(filters = {}) {
     let query = 'SELECT * FROM questions WHERE 1=1';
     const values = [];
 
-    const filterFields = ['test_id', 'category', 'subject', 'topic', 'subtopic', 'difficulty', 'question_type'];
+    const filterFields = ['category', 'subject', 'topic', 'subtopic', 'difficulty', 'question_type'];
     
     for (const field of filterFields) {
-      if (filters[field] !== undefined) {
+      if (filters[field] !== undefined && filters[field] !== '') {
         query += ` AND ${field} = ?`;
         values.push(filters[field]);
+      }
+    }
+
+    if (filters.test_id !== undefined && filters.test_id !== '') {
+      if (filters.test_id === 'null' || filters.test_id === 'none' || filters.test_id === 'unassigned') {
+        query += ' AND test_id IS NULL';
+      } else {
+        query += ' AND test_id = ?';
+        values.push(filters.test_id);
       }
     }
     

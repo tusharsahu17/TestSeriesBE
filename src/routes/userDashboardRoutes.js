@@ -58,6 +58,11 @@ router.get('/dashboard/summary', studentDashboardController.getDashboardSummary)
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
+ *         name: exam_id
+ *         schema:
+ *           type: integer
+ *         description: Filter available tests by exam ID
+ *       - in: query
  *         name: bucket
  *         schema:
  *           type: string
@@ -151,6 +156,29 @@ router.get('/dashboard/notifications', studentDashboardController.getDashboardNo
  *     tags: [Student Dashboard]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: exam_id
+ *         schema:
+ *           type: integer
+ *         description: Filter tests by exam ID
+ *       - in: query
+ *         name: bucket
+ *         schema:
+ *           type: string
+ *           enum: [all, new, upcoming, recommended, free, purchased]
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
  *     responses:
  *       200:
  *         description: Paginated tests list

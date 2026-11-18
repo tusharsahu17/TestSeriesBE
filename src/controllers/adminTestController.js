@@ -46,9 +46,10 @@ const deleteTestHandler = async (req, res) => {
 
 const listTestsHandler = async (req, res) => {
   try {
-    const { is_published } = req.query;
+    const { is_published, exam_id } = req.query;
     const filters = {};
     if (is_published !== undefined) filters.is_published = is_published === 'true';
+    if (exam_id !== undefined && exam_id !== '') filters.exam_id = exam_id;
 
     const tests = await testModel.getAllTests(filters);
     res.json(tests);

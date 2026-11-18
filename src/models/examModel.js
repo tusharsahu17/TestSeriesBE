@@ -225,6 +225,11 @@ async function removeSubjectFromExam(examId, subjectId) {
   }
 }
 
+async function getTestsForExam(examId, filters = {}) {
+  const testModel = require('./testModel');
+  return testModel.getAllTests({ ...filters, exam_id: examId });
+}
+
 module.exports = {
   getExams,
   getExamById,
@@ -233,5 +238,6 @@ module.exports = {
   deleteExam,
   getSubjectsForExam,
   addSubjectToExam,
-  removeSubjectFromExam
+  removeSubjectFromExam,
+  getTestsForExam
 };

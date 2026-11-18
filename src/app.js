@@ -23,12 +23,18 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const pdfRoutes = require('./routes/pdfRoutes');
 const pdfCategoryRoutes = require('./routes/pdfCategoryRoutes');
 const { initPdfTables } = require('./config/initPdf');
+const { initQuestionBankAdmin } = require('./config/initQuestionBankAdmin');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
 
 // Ensure PDF tables exist automatically
 initPdfTables().catch(err => {
   console.warn('PDF tables auto-init warning:', err.message);
+});
+
+// Ensure Question Bank schema and ON DELETE SET NULL foreign key constraint exist
+initQuestionBankAdmin().catch(err => {
+  console.warn('Question bank auto-init warning:', err.message);
 });
 
 const app = express();

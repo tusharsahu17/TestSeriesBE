@@ -61,9 +61,26 @@ async function deleteSubject(id) {
   let connection;
   try {
     connection = await createDbConnection();
-    // Assuming cascading deletes or manual cleanup is needed, but we'll stick to a simple delete
+    await connection.beginTransaction();
+
+    // Unlink questions tied to tests of this subject before deleting subject so they remain in Question Bank
+    try {
+      await connection.query(`
+        UPDATE questions q
+        JOIN tests t ON q.test_id = t.id
+        SET q.test_id = NULL
+        WHERE t.subject_id = ?
+      `, [id]);
+    } catch (e) {
+      // Ignore if table/column difference
+    }
+
     await connection.query(`DELETE FROM subjects WHERE id = ?`, [id]);
+    await connection.commit();
     return true;
+  } catch (err) {
+    if (connection) await connection.rollback();
+    throw err;
   } finally {
     if (connection) await connection.end();
   }

@@ -24,6 +24,8 @@ const adminTestController = require('../controllers/adminTestController');
  *             required:
  *               - name
  *             properties:
+ *               exam_id:
+ *                 type: integer
  *               name:
  *                 type: string
  *               subject_id:
@@ -80,6 +82,11 @@ router.post('/', adminTestController.createTestHandler);
  *         schema:
  *           type: boolean
  *         description: Filter by publish status
+ *       - in: query
+ *         name: exam_id
+ *         schema:
+ *           type: integer
+ *         description: Filter by exam ID
  *     responses:
  *       200:
  *         description: A list of tests
@@ -129,6 +136,8 @@ router.get('/:id', adminTestController.getTestDetailsHandler);
  *           schema:
  *             type: object
  *             properties:
+ *               exam_id:
+ *                 type: integer
  *               name:
  *                 type: string
  *               instructions:

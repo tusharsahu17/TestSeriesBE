@@ -170,4 +170,30 @@ router.post('/:examId/subjects', examController.addSubjectToExam);
  */
 router.delete('/:examId/subjects/:subjectId', examController.removeSubjectFromExam);
 
+/**
+ * @swagger
+ * /api/exams/{examId}/tests:
+ *   get:
+ *     summary: Get all tests belonging to a specific exam
+ *     tags: [Exams]
+ *     parameters:
+ *       - in: path
+ *         name: examId
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The exam ID
+ *       - in: query
+ *         name: is_published
+ *         schema:
+ *           type: boolean
+ *         description: Filter by published status
+ *     responses:
+ *       200:
+ *         description: List of tests belonging to the exam
+ *       500:
+ *         description: Server error
+ */
+router.get('/:examId/tests', examController.getExamTests);
+
 module.exports = router;
