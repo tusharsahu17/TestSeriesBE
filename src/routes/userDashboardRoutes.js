@@ -26,10 +26,6 @@ router.use(authenticateStudent);
  *         schema:
  *           type: string
  *           enum: [7d, 30d, 90d, 6m, 1y, all]
- *       - in: query
- *         name: testSeriesId
- *         schema:
- *           type: integer
  *     responses:
  *       200:
  *         description: Combined dashboard payload
@@ -54,38 +50,6 @@ router.get('/dashboard/summary', studentDashboardController.getDashboardSummary)
 
 /**
  * @swagger
- * /api/user/dashboard/test-series:
- *   get:
- *     summary: Get student's enrolled/purchased test series with completion progress and expiry status
- *     tags: [Student Dashboard]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *           enum: [ALL, ACTIVE, EXPIRED, PENDING, CANCELLED]
- *       - in: query
- *         name: search
- *         schema:
- *           type: string
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: Student's enrolled test series list
- */
-router.get('/dashboard/test-series', studentDashboardController.getMyTestSeries);
-
-/**
- * @swagger
  * /api/user/dashboard/available-tests:
  *   get:
  *     summary: Get eligible and upcoming tests for the authenticated student
@@ -94,14 +58,15 @@ router.get('/dashboard/test-series', studentDashboardController.getMyTestSeries)
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
+ *         name: exam_id
+ *         schema:
+ *           type: integer
+ *         description: Filter available tests by exam ID
+ *       - in: query
  *         name: bucket
  *         schema:
  *           type: string
  *           enum: [all, new, upcoming, recommended, free, purchased]
- *       - in: query
- *         name: testSeriesId
- *         schema:
- *           type: integer
  *       - in: query
  *         name: search
  *         schema:
@@ -159,10 +124,6 @@ router.get('/dashboard/recent-attempts', studentDashboardController.getRecentAtt
  *           type: string
  *           format: date
  *       - in: query
- *         name: testSeriesId
- *         schema:
- *           type: integer
- *       - in: query
  *         name: subject
  *         schema:
  *           type: string
@@ -189,48 +150,35 @@ router.get('/dashboard/notifications', studentDashboardController.getDashboardNo
 // Full pages & actions
 /**
  * @swagger
- * /api/user/test-series:
- *   get:
- *     summary: Get full paginated enrolled test series list for the authenticated student
- *     tags: [Student Dashboard]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Paginated enrolled test series
- */
-router.get('/test-series', studentDashboardController.getMyTestSeries);
-
-/**
- * @swagger
- * /api/user/test-series/{seriesId}:
- *   get:
- *     summary: Get test series detail and tests progress for the authenticated student
- *     tags: [Student Dashboard]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: seriesId
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: Test series details and tests
- *       404:
- *         description: Enrolled test series not found
- */
-router.get('/test-series/:seriesId', studentDashboardController.getTestSeriesDetail);
-
-/**
- * @swagger
  * /api/user/tests:
  *   get:
  *     summary: Get full paginated eligible and upcoming tests for the authenticated student
  *     tags: [Student Dashboard]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: exam_id
+ *         schema:
+ *           type: integer
+ *         description: Filter tests by exam ID
+ *       - in: query
+ *         name: bucket
+ *         schema:
+ *           type: string
+ *           enum: [all, new, upcoming, recommended, free, purchased]
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
  *     responses:
  *       200:
  *         description: Paginated tests list
@@ -251,14 +199,6 @@ router.get('/tests', studentDashboardController.getAvailableTests);
  *         required: true
  *         schema:
  *           type: integer
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               testSeriesId:
- *                 type: integer
  *     responses:
  *       201:
  *         description: Attempt started
@@ -293,10 +233,6 @@ router.post('/tests/:testId/start', studentDashboardController.startTest);
  *         schema:
  *           type: string
  *           enum: [7d, 30d, 90d, 6m, 1y, all]
- *       - in: query
- *         name: testSeriesId
- *         schema:
- *           type: integer
  *       - in: query
  *         name: search
  *         schema:

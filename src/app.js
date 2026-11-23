@@ -8,7 +8,6 @@ const adminUserRoutes = require('./routes/adminUserRoutes');
 const adminDashboardRoutes = require('./routes/adminDashboardRoutes');
 const adminEnrollmentRoutes = require('./routes/adminEnrollmentRoutes');
 const adminPaymentRoutes = require('./routes/adminPaymentRoutes');
-const adminTestSeriesRoutes = require('./routes/adminTestSeriesRoutes');
 const adminTestRoutes = require('./routes/adminTestRoutes');
 const adminQuestionRoutes = require('./routes/adminQuestionRoutes');
 const adminSubjectHierarchyRoutes = require('./routes/adminSubjectHierarchyRoutes');
@@ -24,12 +23,18 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const pdfRoutes = require('./routes/pdfRoutes');
 const pdfCategoryRoutes = require('./routes/pdfCategoryRoutes');
 const { initPdfTables } = require('./config/initPdf');
+const { initQuestionBankAdmin } = require('./config/initQuestionBankAdmin');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
 
 // Ensure PDF tables exist automatically
 initPdfTables().catch(err => {
   console.warn('PDF tables auto-init warning:', err.message);
+});
+
+// Ensure Question Bank schema and ON DELETE SET NULL foreign key constraint exist
+initQuestionBankAdmin().catch(err => {
+  console.warn('Question bank auto-init warning:', err.message);
 });
 
 const app = express();
@@ -62,7 +67,6 @@ app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/admin/enrollments', adminEnrollmentRoutes);
 app.use('/api/admin/payments', adminPaymentRoutes);
-app.use('/api/admin/test-series', adminTestSeriesRoutes);
 app.use('/api/admin/tests', adminTestRoutes);
 app.use('/api/admin/questions', adminQuestionRoutes);
 app.use('/api/admin/hierarchy', adminSubjectHierarchyRoutes);

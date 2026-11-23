@@ -167,7 +167,7 @@ function computeEngagementStatus({
   if (activeEnrollmentsCount > 0 && totalAttempts === 0 && daysSinceJoined > 7) {
     return {
       status: 'at_risk',
-      reason: 'Enrolled in test series with no test attempts yet',
+      reason: 'Registered student with no test attempts yet',
       daysSinceLastActive,
       daysSinceLastLogin,
       lastActivityAt: lastActivityDate.toISOString(),
@@ -222,14 +222,10 @@ async function getEngagementContext(connection, user) {
     [userId]
   );
 
-  const [[enrollmentAgg]] = await connection.query(
-    `SELECT
-       SUM(CASE WHEN status = 'ACTIVE' AND (expires_at IS NULL OR expires_at > NOW()) THEN 1 ELSE 0 END) AS activeEnrollments,
-       SUM(CASE WHEN enrollment_type = 'PAID' AND status = 'ACTIVE' AND (expires_at IS NULL OR expires_at > NOW()) THEN 1 ELSE 0 END) AS activePaidEnrollments
-     FROM test_series_enrollments
-     WHERE user_id = ?`,
-    [userId]
-  );
+  const enrollmentAgg = {
+    activeEnrollments: 0,
+    activePaidEnrollments: 0,
+  };
 
   const [[subscriptionAgg]] = await connection.query(
     `SELECT
@@ -597,20 +593,10 @@ async function getStudentTestHistory(userId, filters = {}, existingConnection = 
       params.push(String(filters.status).trim().toUpperCase());
     }
 
-    if (filters.testSeriesId) {
-      const seriesId = parsePositiveInt(filters.testSeriesId);
-      if (seriesId) {
-        conditions.push(
-          '(ta.test_series_id = ? OR EXISTS (SELECT 1 FROM test_series_tests tst_f WHERE tst_f.test_id = ta.test_id AND tst_f.test_series_id = ?))'
-        );
-        params.push(seriesId, seriesId);
-      }
-    }
-
     if (filters.search && String(filters.search).trim()) {
       const like = `%${String(filters.search).trim()}%`;
-      conditions.push('(t.name LIKE ? OR ts.title LIKE ? OR s.name LIKE ?)');
-      params.push(like, like, like);
+      conditions.push('(t.name LIKE ? OR s.name LIKE ?)');
+      params.push(like, like);
     }
 
     appendDateRange(conditions, params, 'COALESCE(ta.submitted_at, ta.started_at, ta.created_at)', filters.dateFrom, filters.dateTo);
@@ -622,7 +608,6 @@ async function getStudentTestHistory(userId, filters = {}, existingConnection = 
        FROM test_attempts ta
        LEFT JOIN tests t ON ta.test_id = t.id
        LEFT JOIN subjects s ON t.subject_id = s.id
-       LEFT JOIN test_series ts ON ta.test_series_id = ts.id
        WHERE ${whereSql}`,
       params
     );
@@ -635,14 +620,8 @@ async function getStudentTestHistory(userId, filters = {}, existingConnection = 
          ta.user_id,
          ta.test_id,
          COALESCE(t.name, CONCAT('Test #', ta.test_id)) AS test_name,
-         COALESCE(
-           ta.test_series_id,
-           (SELECT tst2.test_series_id FROM test_series_tests tst2 WHERE tst2.test_id = ta.test_id ORDER BY tst2.display_order ASC, tst2.test_series_id ASC LIMIT 1)
-         ) AS test_series_id,
-         COALESCE(
-           ts.title,
-           (SELECT ts2.title FROM test_series_tests tst2 JOIN test_series ts2 ON tst2.test_series_id = ts2.id WHERE tst2.test_id = ta.test_id ORDER BY tst2.display_order ASC, tst2.test_series_id ASC LIMIT 1)
-         ) AS test_series_title,
+         NULL AS test_series_id,
+         NULL AS test_series_title,
          COALESCE(s.name, 'General') AS subject_name,
          ta.total_questions,
          ta.attempted_questions,
@@ -665,7 +644,6 @@ async function getStudentTestHistory(userId, filters = {}, existingConnection = 
        FROM test_attempts ta
        LEFT JOIN tests t ON ta.test_id = t.id
        LEFT JOIN subjects s ON t.subject_id = s.id
-       LEFT JOIN test_series ts ON ta.test_series_id = ts.id
        WHERE ${whereSql}
        ORDER BY COALESCE(ta.submitted_at, ta.started_at, ta.created_at) DESC, ta.id DESC
        LIMIT ? OFFSET ?`,
@@ -725,14 +703,10 @@ async function getStudentAttemptDetail(userId, attemptId, existingConnection = n
          t.duration_minutes,
          t.passing_marks,
          COALESCE(s.name, 'General') AS subject_name,
-         COALESCE(
-           ts.title,
-           (SELECT ts2.title FROM test_series_tests tst2 JOIN test_series ts2 ON tst2.test_series_id = ts2.id WHERE tst2.test_id = ta.test_id ORDER BY tst2.display_order ASC, tst2.test_series_id ASC LIMIT 1)
-         ) AS test_series_title
+         NULL AS test_series_title
        FROM test_attempts ta
        LEFT JOIN tests t ON ta.test_id = t.id
        LEFT JOIN subjects s ON t.subject_id = s.id
-       LEFT JOIN test_series ts ON ta.test_series_id = ts.id
        WHERE ta.id = ? AND ta.user_id = ?`,
       [attemptId, userId]
     );
@@ -865,408 +839,44 @@ async function getStudentTestSeries(userId, filters = {}, existingConnection = n
     const user = await fetchBaseUser(connection, userId);
     if (!user) return null;
 
-    const { page, limit, offset } = parsePagination(filters, 20, 100);
-    const conditions = ['e.user_id = ?'];
-    const params = [userId];
-
-    if (filters.status && String(filters.status).trim() && String(filters.status).toUpperCase() !== 'ALL') {
-      const upper = String(filters.status).trim().toUpperCase();
-      if (upper === 'EXPIRED') {
-        conditions.push("(e.status = 'EXPIRED' OR (e.status = 'ACTIVE' AND e.expires_at IS NOT NULL AND e.expires_at <= NOW()))");
-      } else if (upper === 'ACTIVE') {
-        conditions.push("(e.status = 'ACTIVE' AND (e.expires_at IS NULL OR e.expires_at > NOW()))");
-      } else {
-        conditions.push('e.status = ?');
-        params.push(upper);
-      }
-    }
-
-    if (filters.search && String(filters.search).trim()) {
-      conditions.push('(ts.title LIKE ? OR c.name LIKE ?)');
-      const like = `%${String(filters.search).trim()}%`;
-      params.push(like, like);
-    }
-
-    const whereSql = conditions.join(' AND ');
-
-    const [[summaryRow]] = await connection.query(
-      `SELECT
-         COUNT(*) AS total,
-         SUM(CASE WHEN e.status = 'ACTIVE' AND (e.expires_at IS NULL OR e.expires_at > NOW()) THEN 1 ELSE 0 END) AS active,
-         SUM(CASE WHEN e.status = 'EXPIRED' OR (e.status = 'ACTIVE' AND e.expires_at IS NOT NULL AND e.expires_at <= NOW()) THEN 1 ELSE 0 END) AS expired,
-         SUM(CASE WHEN e.status = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled
-       FROM test_series_enrollments e
-       WHERE e.user_id = ?`,
-      [userId]
-    );
-
-    const [[countRow]] = await connection.query(
-      `SELECT COUNT(*) AS total
-       FROM test_series_enrollments e
-       JOIN test_series ts ON e.test_series_id = ts.id
-       LEFT JOIN categories c ON ts.category_id = c.id
-       WHERE ${whereSql}`,
-      params
-    );
-
-    const total = toNumber(countRow.total);
-
-    const [rows] = await connection.query(
-      `SELECT
-         e.id,
-         e.user_id,
-         e.test_series_id,
-         e.payment_id,
-         e.enrollment_type,
-         e.status,
-         e.enrolled_at,
-         e.expires_at,
-         e.created_at,
-         e.updated_at,
-         ts.title AS test_series_title,
-         ts.description AS test_series_description,
-         ts.price AS test_series_price,
-         ts.is_paid,
-         ts.validity_days,
-         ts.difficulty_level,
-         c.name AS category_name,
-         p.order_id,
-         p.transaction_id,
-         p.amount AS paid_amount,
-         p.status AS payment_status,
-         p.paid_at,
-         (SELECT COUNT(*) FROM test_series_tests tst WHERE tst.test_series_id = ts.id) AS total_tests,
-         (
-           SELECT COUNT(DISTINCT ta.test_id)
-           FROM test_attempts ta
-           WHERE ta.user_id = e.user_id
-             AND ta.status = 'COMPLETED'
-             AND (
-               ta.test_series_id = ts.id
-               OR EXISTS (
-                 SELECT 1 FROM test_series_tests tst2
-                 WHERE tst2.test_series_id = ts.id AND tst2.test_id = ta.test_id
-               )
-             )
-         ) AS completed_tests
-       FROM test_series_enrollments e
-       JOIN test_series ts ON e.test_series_id = ts.id
-       LEFT JOIN categories c ON ts.category_id = c.id
-       LEFT JOIN payments p ON e.payment_id = p.id
-       WHERE ${whereSql}
-       ORDER BY e.enrolled_at DESC, e.id DESC
-       LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
-    );
-
-    const now = Date.now();
-    const items = rows.map((row) => {
-      const expiresTime = row.expires_at ? new Date(row.expires_at).getTime() : null;
-      const isDateExpired = Boolean(expiresTime && expiresTime <= now);
-      const effectiveStatus =
-        row.status === 'ACTIVE' && isDateExpired ? 'EXPIRED' : row.status;
-      return {
-        id: row.id,
-        user_id: row.user_id,
-        test_series_id: row.test_series_id,
-        test_series_title: row.test_series_title,
-        test_series_description: row.test_series_description || null,
-        category_name: row.category_name || null,
-        difficulty_level: row.difficulty_level || null,
-        test_series_price: roundTwo(row.test_series_price),
-        is_paid: Boolean(row.is_paid),
-        validity_days: row.validity_days ?? null,
-        enrollment_type: row.enrollment_type,
-        status: row.status,
-        effective_status: effectiveStatus,
-        is_expired: effectiveStatus === 'EXPIRED',
-        enrolled_at: row.enrolled_at,
-        purchase_date: row.paid_at || row.enrolled_at,
-        expires_at: row.expires_at,
-        payment_id: row.payment_id || null,
-        order_id: row.order_id || null,
-        transaction_id: row.transaction_id || null,
-        paid_amount: row.paid_amount !== null && row.paid_amount !== undefined ? roundTwo(row.paid_amount) : null,
-        payment_status: row.payment_status || null,
-        total_tests: toNumber(row.total_tests),
-        completed_tests: toNumber(row.completed_tests),
-      };
-    });
-
+    const { page, limit } = parsePagination(filters, 20, 100);
     return {
-      items,
+      items: [],
       summary: {
-        total: toNumber(summaryRow.total),
-        active: toNumber(summaryRow.active),
-        expired: toNumber(summaryRow.expired),
-        cancelled: toNumber(summaryRow.cancelled),
+        total: 0,
+        active: 0,
+        expired: 0,
+        cancelled: 0,
       },
       pagination: {
         page,
         limit,
-        total,
-        totalPages: total > 0 ? Math.ceil(total / limit) : 0,
+        total: 0,
+        totalPages: 0,
       },
     };
   });
 }
 
 async function assignTestSeriesToStudent(userId, payload = {}) {
-  let connection;
-  try {
-    connection = await createDbConnection();
-    await connection.beginTransaction();
-
-    const user = await fetchBaseUser(connection, userId);
-    if (!user) {
-      const err = new Error('User not found');
-      err.status = 404;
-      throw err;
-    }
-
-    const testSeriesId = parsePositiveInt(payload.test_series_id ?? payload.testSeriesId);
-    if (!testSeriesId) {
-      const err = new Error('Valid test_series_id is required');
-      err.status = 400;
-      throw err;
-    }
-
-    const [seriesRows] = await connection.query(
-      'SELECT id, title, is_paid, validity_days FROM test_series WHERE id = ?',
-      [testSeriesId]
-    );
-    if (seriesRows.length === 0) {
-      const err = new Error('Test series not found');
-      err.status = 404;
-      throw err;
-    }
-    const series = seriesRows[0];
-
-    const [activeExisting] = await connection.query(
-      `SELECT id FROM test_series_enrollments
-       WHERE user_id = ? AND test_series_id = ? AND status = 'ACTIVE'
-         AND (expires_at IS NULL OR expires_at > NOW())`,
-      [userId, testSeriesId]
-    );
-    if (activeExisting.length > 0) {
-      const err = new Error('Student already has active access to this test series. Extend access instead.');
-      err.status = 409;
-      throw err;
-    }
-
-    const enrollmentType = payload.enrollment_type || (series.is_paid ? 'PAID' : 'FREE');
-    if (!['FREE', 'PAID'].includes(enrollmentType)) {
-      const err = new Error('enrollment_type must be FREE or PAID');
-      err.status = 400;
-      throw err;
-    }
-
-    const status = payload.status || 'ACTIVE';
-    if (!['ACTIVE', 'EXPIRED', 'CANCELLED'].includes(status)) {
-      const err = new Error('status must be ACTIVE, EXPIRED, or CANCELLED');
-      err.status = 400;
-      throw err;
-    }
-
-    let resolvedExpiresAt = payload.expires_at ?? payload.expiresAt ?? null;
-    const customDays = parsePositiveInt(payload.validity_days ?? payload.validityDays);
-    if (!resolvedExpiresAt && (customDays || series.validity_days)) {
-      const days = customDays || Number(series.validity_days);
-      const expiry = new Date();
-      expiry.setDate(expiry.getDate() + days);
-      resolvedExpiresAt = expiry;
-    }
-
-    const [insertRes] = await connection.query(
-      `INSERT INTO test_series_enrollments
-        (user_id, test_series_id, payment_id, enrollment_type, status, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [userId, testSeriesId, payload.payment_id || null, enrollmentType, status, resolvedExpiresAt]
-    );
-
-    if (enrollmentType === 'PAID' && status === 'ACTIVE') {
-      await connection.query(
-        "UPDATE users SET subscription_status = 'active', last_active_at = NOW() WHERE id = ?",
-        [userId]
-      );
-    }
-
-    await connection.query(
-      'INSERT INTO user_activity_logs (user_id, activity_type, reference_id, metadata) VALUES (?, ?, ?, ?)',
-      [
-        userId,
-        'SERIES_ENROLL',
-        testSeriesId,
-        JSON.stringify({
-          enrollmentId: insertRes.insertId,
-          seriesTitle: series.title,
-          enrollmentType,
-          assignedByAdmin: true,
-        }),
-      ]
-    );
-
-    await connection.commit();
-
-    const [createdRows] = await connection.query(
-      `SELECT e.*, ts.title AS test_series_title
-       FROM test_series_enrollments e
-       JOIN test_series ts ON e.test_series_id = ts.id
-       WHERE e.id = ?`,
-      [insertRes.insertId]
-    );
-    return createdRows[0];
-  } catch (err) {
-    if (connection) await connection.rollback();
-    throw err;
-  } finally {
-    if (connection) await connection.end();
-  }
+  const err = new Error("Test series functionality has been removed. Tests are accessible directly without enrollment.");
+  err.status = 400;
+  throw err;
 }
 
 async function extendTestSeriesAccess(userId, enrollmentId, payload = {}) {
-  let connection;
-  try {
-    connection = await createDbConnection();
-    await connection.beginTransaction();
-
-    const [existingRows] = await connection.query(
-      `SELECT e.*, ts.title AS test_series_title
-       FROM test_series_enrollments e
-       JOIN test_series ts ON e.test_series_id = ts.id
-       WHERE e.id = ? AND e.user_id = ?`,
-      [enrollmentId, userId]
-    );
-    if (existingRows.length === 0) {
-      await connection.rollback();
-      return null;
-    }
-    const enrollment = existingRows[0];
-
-    const extendDays = parsePositiveInt(payload.extend_days ?? payload.extendDays);
-    const explicitExpiresAt = payload.expires_at ?? payload.expiresAt ?? null;
-    const nextStatus = payload.status || 'ACTIVE';
-
-    if (!['ACTIVE', 'EXPIRED', 'CANCELLED'].includes(nextStatus)) {
-      const err = new Error('status must be ACTIVE, EXPIRED, or CANCELLED');
-      err.status = 400;
-      throw err;
-    }
-
-    if (!extendDays && !explicitExpiresAt) {
-      const err = new Error('Either extend_days (positive integer) or expires_at is required');
-      err.status = 400;
-      throw err;
-    }
-
-    if (explicitExpiresAt) {
-      const parsedDate = new Date(explicitExpiresAt);
-      if (Number.isNaN(parsedDate.getTime())) {
-        const err = new Error('Invalid expires_at date');
-        err.status = 400;
-        throw err;
-      }
-      await connection.query(
-        'UPDATE test_series_enrollments SET expires_at = ?, status = ? WHERE id = ? AND user_id = ?',
-        [parsedDate, nextStatus, enrollmentId, userId]
-      );
-    } else {
-      await connection.query(
-        `UPDATE test_series_enrollments
-         SET expires_at = DATE_ADD(GREATEST(COALESCE(expires_at, NOW()), NOW()), INTERVAL ? DAY),
-             status = ?
-         WHERE id = ? AND user_id = ?`,
-        [extendDays, nextStatus, enrollmentId, userId]
-      );
-    }
-
-    if (enrollment.enrollment_type === 'PAID' && nextStatus === 'ACTIVE') {
-      await connection.query(
-        "UPDATE users SET subscription_status = 'active' WHERE id = ?",
-        [userId]
-      );
-    }
-
-    const [updatedRows] = await connection.query(
-      `SELECT e.*, ts.title AS test_series_title
-       FROM test_series_enrollments e
-       JOIN test_series ts ON e.test_series_id = ts.id
-       WHERE e.id = ?`,
-      [enrollmentId]
-    );
-    const updated = updatedRows[0];
-
-    await connection.query(
-      'INSERT INTO user_activity_logs (user_id, activity_type, reference_id, metadata) VALUES (?, ?, ?, ?)',
-      [
-        userId,
-        'SERIES_ACCESS_EXTENDED',
-        enrollment.test_series_id,
-        JSON.stringify({
-          enrollmentId: Number(enrollmentId),
-          seriesTitle: enrollment.test_series_title,
-          extendDays: extendDays || null,
-          expiresAt: updated.expires_at,
-        }),
-      ]
-    );
-
-    await connection.commit();
-    return updated;
-  } catch (err) {
-    if (connection) await connection.rollback();
-    throw err;
-  } finally {
-    if (connection) await connection.end();
-  }
+  const err = new Error("Test series functionality has been removed. Tests are accessible directly without enrollment.");
+  err.status = 400;
+  throw err;
 }
 
 async function updateStudentEnrollmentStatus(userId, enrollmentId, status) {
-  let connection;
-  try {
-    connection = await createDbConnection();
-    await connection.beginTransaction();
-
-    const [rows] = await connection.query(
-      `SELECT e.*, ts.title AS test_series_title
-       FROM test_series_enrollments e
-       JOIN test_series ts ON e.test_series_id = ts.id
-       WHERE e.id = ? AND e.user_id = ?`,
-      [enrollmentId, userId]
-    );
-    if (rows.length === 0) {
-      await connection.rollback();
-      return null;
-    }
-
-    await connection.query(
-      'UPDATE test_series_enrollments SET status = ? WHERE id = ? AND user_id = ?',
-      [status, enrollmentId, userId]
-    );
-
-    await connection.query(
-      'INSERT INTO user_activity_logs (user_id, activity_type, reference_id, metadata) VALUES (?, ?, ?, ?)',
-      [
-        userId,
-        'SERIES_STATUS_UPDATED',
-        rows[0].test_series_id,
-        JSON.stringify({
-          enrollmentId: Number(enrollmentId),
-          seriesTitle: rows[0].test_series_title,
-          status,
-        }),
-      ]
-    );
-
-    await connection.commit();
-    return { ...rows[0], status };
-  } catch (err) {
-    if (connection) await connection.rollback();
-    throw err;
-  } finally {
-    if (connection) await connection.end();
-  }
+  const err = new Error("Test series functionality has been removed. Tests are accessible directly without enrollment.");
+  err.status = 400;
+  throw err;
 }
+const updateStudentTestSeriesStatus = updateStudentEnrollmentStatus;
+
 
 async function getStudentPayments(userId, filters = {}, existingConnection = null) {
   return withConnection(existingConnection, async (connection) => {
@@ -1284,8 +894,8 @@ async function getStudentPayments(userId, filters = {}, existingConnection = nul
 
     if (filters.search && String(filters.search).trim()) {
       const like = `%${String(filters.search).trim()}%`;
-      conditions.push('(p.order_id LIKE ? OR p.transaction_id LIKE ? OR ts.title LIKE ? OR sub.plan_name LIKE ?)');
-      params.push(like, like, like, like);
+      conditions.push('(p.order_id LIKE ? OR p.transaction_id LIKE ? OR sub.plan_name LIKE ?)');
+      params.push(like, like, like);
     }
 
     appendDateRange(conditions, params, 'COALESCE(p.paid_at, p.created_at)', filters.dateFrom, filters.dateTo);
@@ -1310,7 +920,6 @@ async function getStudentPayments(userId, filters = {}, existingConnection = nul
     const [[countRow]] = await connection.query(
       `SELECT COUNT(*) AS total
        FROM payments p
-       LEFT JOIN test_series ts ON p.test_series_id = ts.id
        LEFT JOIN subscriptions sub ON p.subscription_id = sub.id
        WHERE ${whereSql}`,
       params
@@ -1338,10 +947,9 @@ async function getStudentPayments(userId, filters = {}, existingConnection = nul
          p.notes,
          p.created_at,
          p.updated_at,
-         ts.title AS test_series_title,
+         NULL AS test_series_title,
          sub.plan_name
        FROM payments p
-       LEFT JOIN test_series ts ON p.test_series_id = ts.id
        LEFT JOIN subscriptions sub ON p.subscription_id = sub.id
        WHERE ${whereSql}
        ORDER BY COALESCE(p.paid_at, p.created_at) DESC, p.id DESC
@@ -1400,13 +1008,12 @@ async function getStudentPaymentDetail(userId, paymentId, existingConnection = n
          p.notes,
          p.created_at,
          p.updated_at,
-         ts.title AS test_series_title,
+         NULL AS test_series_title,
          sub.plan_name,
          u.name AS user_name,
          u.email AS user_email
        FROM payments p
        JOIN users u ON p.user_id = u.id
-       LEFT JOIN test_series ts ON p.test_series_id = ts.id
        LEFT JOIN subscriptions sub ON p.subscription_id = sub.id
        WHERE p.id = ? AND p.user_id = ?`,
       [paymentId, userId]
@@ -1493,7 +1100,7 @@ async function getStudentActivity(userId, filters = {}, existingConnection = nul
          ual.created_at,
          t_start.name AS start_test_name,
          t_sub.name AS submit_test_name,
-         ts.title AS series_title
+         NULL AS series_title
        FROM user_activity_logs ual
        LEFT JOIN tests t_start
          ON ual.activity_type = 'TEST_START' AND ual.reference_id = t_start.id
@@ -1501,9 +1108,6 @@ async function getStudentActivity(userId, filters = {}, existingConnection = nul
          ON ual.activity_type = 'TEST_SUBMIT' AND ual.reference_id = ta_sub.id
        LEFT JOIN tests t_sub
          ON ta_sub.test_id = t_sub.id
-       LEFT JOIN test_series ts
-         ON ual.activity_type IN ('SERIES_ENROLL', 'SERIES_ACCESS_EXTENDED', 'SERIES_STATUS_UPDATED')
-        AND ual.reference_id = ts.id
        WHERE ${whereSql}
        ORDER BY ual.created_at DESC, ual.id DESC
        LIMIT ? OFFSET ?`,
@@ -1548,9 +1152,8 @@ async function getStudentActivity(userId, filters = {}, existingConnection = nul
          p.amount,
          p.currency,
          COALESCE(p.paid_at, p.created_at) AS purchased_at,
-         ts.title AS test_series_title
+         NULL AS test_series_title
        FROM payments p
-       LEFT JOIN test_series ts ON p.test_series_id = ts.id
        WHERE p.user_id = ? AND p.status = 'SUCCESS'
        ORDER BY COALESCE(p.paid_at, p.created_at) ASC, p.id ASC
        LIMIT 1`,
@@ -1750,12 +1353,11 @@ function formatStudentReportCsv(report) {
   pushRow([]);
 
   pushRow(['Test History']);
-  pushRow(['Attempt ID', 'Test Name', 'Series', 'Score', 'Percentage (%)', 'Accuracy (%)', 'Time Taken (sec)', 'Status', 'Date']);
+  pushRow(['Attempt ID', 'Test Name', 'Score', 'Percentage (%)', 'Accuracy (%)', 'Time Taken (sec)', 'Status', 'Date']);
   for (const item of report.testHistory) {
     pushRow([
       item.id,
       item.test_name,
-      item.test_series_title || '',
       item.obtained_marks !== null ? `${item.obtained_marks}/${item.total_marks}` : '',
       item.percentage ?? '',
       item.accuracy ?? '',
@@ -1763,13 +1365,6 @@ function formatStudentReportCsv(report) {
       item.status,
       item.submitted_at || item.started_at || '',
     ]);
-  }
-  pushRow([]);
-
-  pushRow(['Enrolled Test Series']);
-  pushRow(['Enrollment ID', 'Series Title', 'Type', 'Access Status', 'Enrolled At', 'Expires At']);
-  for (const enr of report.testSeries) {
-    pushRow([enr.id, enr.test_series_title, enr.enrollment_type, enr.effective_status, enr.enrolled_at, enr.expires_at || 'Lifetime']);
   }
   pushRow([]);
 
@@ -1785,13 +1380,13 @@ function formatStudentReportCsv(report) {
   pushRow([]);
 
   pushRow(['Payments']);
-  pushRow(['Payment ID', 'Order ID', 'Transaction ID', 'Series/Plan', 'Amount', 'Method', 'Status', 'Date']);
+  pushRow(['Payment ID', 'Order ID', 'Transaction ID', 'Plan', 'Amount', 'Method', 'Status', 'Date']);
   for (const p of report.payments) {
     pushRow([
       p.id,
       p.order_id || '',
       p.transaction_id || '',
-      p.test_series_title || p.plan_name || '',
+      p.plan_name || '',
       `${p.currency || 'INR'} ${p.amount}`,
       p.payment_method || '',
       p.status,

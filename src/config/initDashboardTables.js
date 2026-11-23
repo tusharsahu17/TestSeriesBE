@@ -1,6 +1,17 @@
 require('dotenv').config();
 const { createDbConnection } = require('./db');
 
+async function tableExists(connection, tableName) {
+  const [rows] = await connection.query(
+    `SELECT 1
+     FROM INFORMATION_SCHEMA.TABLES
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?`,
+    [tableName]
+  );
+  return rows.length > 0;
+}
+
 async function columnExists(connection, tableName, columnName) {
   const [rows] = await connection.query(
     `SELECT 1
@@ -52,10 +63,14 @@ async function initDashboardTables() {
     await ensureIndex(connection, 'users', 'idx_users_role_created', 'role, created_at');
     await ensureIndex(connection, 'users', 'idx_users_last_active', 'last_active_at');
 
-    await ensureColumn(connection, 'test_series', 'published_at', 'DATETIME NULL');
-    await ensureColumn(connection, 'test_attempts', 'test_series_id', 'INT NULL');
-    await ensureIndex(connection, 'test_attempts', 'idx_test_attempts_series_id', 'test_series_id');
-    await ensureIndex(connection, 'test_attempts', 'idx_test_attempts_status_started', 'status, started_at');
+    if (await tableExists(connection, 'test_series')) {
+      await ensureColumn(connection, 'test_series', 'published_at', 'DATETIME NULL');
+    }
+    if (await tableExists(connection, 'test_attempts')) {
+      await ensureColumn(connection, 'test_attempts', 'test_series_id', 'INT NULL');
+      await ensureIndex(connection, 'test_attempts', 'idx_test_attempts_series_id', 'test_series_id');
+      await ensureIndex(connection, 'test_attempts', 'idx_test_attempts_status_started', 'status, started_at');
+    }
 
     // Backfill last_active_at for existing users if null
     await connection.query(`
@@ -69,12 +84,14 @@ async function initDashboardTables() {
       WHERE u.last_active_at IS NULL
     `);
 
-    // Backfill published_at for existing published test_series
-    await connection.query(`
-      UPDATE test_series
-      SET published_at = COALESCE(updated_at, created_at)
-      WHERE is_published = 1 AND published_at IS NULL
-    `);
+    // Backfill published_at for existing published test_series if present
+    if (await tableExists(connection, 'test_series')) {
+      await connection.query(`
+        UPDATE test_series
+        SET published_at = COALESCE(updated_at, created_at)
+        WHERE is_published = 1 AND published_at IS NULL
+      `);
+    }
 
     console.log('Creating subscriptions table...');
     await connection.query(`
@@ -93,8 +110,7 @@ async function initDashboardTables() {
         INDEX idx_subscriptions_user_id (user_id),
         INDEX idx_subscriptions_status (status),
         INDEX idx_subscriptions_expires_at (expires_at),
-        CONSTRAINT fk_subscriptions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        CONSTRAINT fk_subscriptions_series FOREIGN KEY (test_series_id) REFERENCES test_series(id) ON DELETE SET NULL
+        CONSTRAINT fk_subscriptions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
@@ -126,7 +142,6 @@ async function initDashboardTables() {
         INDEX idx_payments_paid_at (paid_at),
         INDEX idx_payments_created_at (created_at),
         CONSTRAINT fk_payments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        CONSTRAINT fk_payments_series FOREIGN KEY (test_series_id) REFERENCES test_series(id) ON DELETE SET NULL,
         CONSTRAINT fk_payments_subscription FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
@@ -149,7 +164,6 @@ async function initDashboardTables() {
         INDEX idx_enrollments_type_status (enrollment_type, status),
         INDEX idx_enrollments_enrolled_at (enrolled_at),
         CONSTRAINT fk_enrollments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        CONSTRAINT fk_enrollments_series FOREIGN KEY (test_series_id) REFERENCES test_series(id) ON DELETE CASCADE,
         CONSTRAINT fk_enrollments_payment FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);

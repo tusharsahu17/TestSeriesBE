@@ -86,6 +86,34 @@ async function removeSubjectFromExam(req, res) {
   }
 }
 
+async function getExamTests(req, res) {
+  try {
+    const examId = req.params.examId || req.params.id;
+    const { is_published, is_active } = req.query;
+    const filters = {};
+    if (is_published !== undefined) {
+      if (is_published !== 'all') {
+        filters.is_published = is_published === 'true';
+      }
+    } else {
+      // Default to published tests only for student/public endpoint
+      filters.is_published = true;
+    }
+    if (is_active !== undefined) {
+      if (is_active !== 'all') {
+        filters.is_active = is_active === 'true';
+      }
+    } else {
+      // Default to active tests only for student/public endpoint
+      filters.is_active = true;
+    }
+    const tests = await examModel.getTestsForExam(examId, filters);
+    res.json(tests);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
 module.exports = {
   getAllExams,
   getExamDetails,
@@ -94,5 +122,6 @@ module.exports = {
   deleteExam,
   getExamSubjects,
   addSubjectToExam,
-  removeSubjectFromExam
+  removeSubjectFromExam,
+  getExamTests
 };

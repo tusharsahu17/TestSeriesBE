@@ -80,29 +80,7 @@ async function getTestLeaderboard(testId) {
 }
 
 async function getSeriesLeaderboard(seriesId) {
-  let connection;
-  try {
-    connection = await createDbConnection();
-    // Sum of highest scores in tests that belong to the series
-    const [rows] = await connection.query(`
-      SELECT 
-        u.id as user_id, u.name, u.email,
-        SUM(best_attempts.max_score) as total_score
-      FROM users u
-      JOIN (
-        SELECT ta.user_id, ta.test_id, MAX(ta.obtained_marks) as max_score
-        FROM test_attempts ta
-        JOIN test_series_tests tst ON ta.test_id = tst.test_id
-        WHERE tst.test_series_id = ? AND ta.status = 'COMPLETED'
-        GROUP BY ta.user_id, ta.test_id
-      ) best_attempts ON u.id = best_attempts.user_id
-      GROUP BY u.id
-      ORDER BY total_score DESC
-    `, [seriesId]);
-    return rows.map((row, idx) => ({ ...row, rank: idx + 1 }));
-  } finally {
-    if (connection) await connection.end();
-  }
+  return [];
 }
 
 async function getWeeklyLeaderboard() {
@@ -168,14 +146,16 @@ async function getCategoryLeaderboard(categoryName) {
       JOIN (
         SELECT ta.user_id, ta.test_id, MAX(ta.obtained_marks) as max_score
         FROM test_attempts ta
-        JOIN test_series_tests tst ON ta.test_id = tst.test_id
-        JOIN test_series ts ON tst.test_series_id = ts.id
-        WHERE ts.category = ? AND ta.status = 'COMPLETED'
+        JOIN tests t ON ta.test_id = t.id
+        JOIN subjects s ON t.subject_id = s.id
+        LEFT JOIN exam_subjects es ON es.subject_id = s.id
+        LEFT JOIN exams e ON es.exam_id = e.id
+        WHERE (e.category = ? OR e.name = ? OR s.name = ?) AND ta.status = 'COMPLETED'
         GROUP BY ta.user_id, ta.test_id
       ) best_attempts ON u.id = best_attempts.user_id
       GROUP BY u.id
       ORDER BY total_score DESC
-    `, [categoryName]);
+    `, [categoryName, categoryName, categoryName]);
     return rows.map((row, idx) => ({ ...row, rank: idx + 1 }));
   } finally {
     if (connection) await connection.end();

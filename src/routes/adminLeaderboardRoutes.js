@@ -88,26 +88,6 @@ router.get('/test/:testId', adminLeaderboardController.getTestLeaderboardHandler
 
 /**
  * @swagger
- * /api/admin/leaderboards/series/{seriesId}:
- *   get:
- *     summary: Get leaderboard for a specific test series
- *     tags: [Admin - Leaderboards]
- *     parameters:
- *       - in: path
- *         name: seriesId
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: Series-wise leaderboard aggregating highest scores for tests in series
- *       500:
- *         description: Server error
- */
-router.get('/series/:seriesId', adminLeaderboardController.getSeriesLeaderboardHandler);
-
-/**
- * @swagger
  * /api/admin/leaderboards/weekly:
  *   get:
  *     summary: Get weekly leaderboard
@@ -148,7 +128,7 @@ router.get('/monthly', adminLeaderboardController.getMonthlyLeaderboardHandler);
  *           type: string
  *     responses:
  *       200:
- *         description: Category-wise leaderboard aggregating scores for tests in test_series matching category
+ *         description: Category-wise leaderboard aggregating scores for tests matching category
  *       500:
  *         description: Server error
  */

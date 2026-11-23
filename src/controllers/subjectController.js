@@ -2,7 +2,17 @@ const subjectModel = require('../models/subjectModel');
 
 async function getSubjectTests(req, res) {
   try {
-    const tests = await subjectModel.getTestsBySubjectId(req.params.subjectId);
+    const { is_published } = req.query;
+    const filters = {};
+    if (is_published !== undefined) {
+      if (is_published !== 'all') {
+        filters.is_published = is_published === 'true';
+      }
+    } else {
+      // Default to published tests only for student/public endpoint
+      filters.is_published = true;
+    }
+    const tests = await subjectModel.getTestsBySubjectId(req.params.subjectId, filters);
     res.json(tests);
   } catch (error) {
     res.status(500).json({ error: error.message });

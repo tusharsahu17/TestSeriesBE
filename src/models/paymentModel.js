@@ -1,36 +1,7 @@
 const { createDbConnection } = require('../config/db');
 const notificationModel = require('./notificationModel');
 
-async function activatePaidAccess(connection, { paymentId, userId, testSeriesId, subscriptionId }) {
-  if (testSeriesId) {
-    const [existing] = await connection.query(
-      'SELECT id FROM test_series_enrollments WHERE payment_id = ?',
-      [paymentId]
-    );
-    if (existing.length === 0) {
-      const [seriesRows] = await connection.query(
-        'SELECT validity_days FROM test_series WHERE id = ?',
-        [testSeriesId]
-      );
-      let expiresAt = null;
-      if (seriesRows.length > 0 && seriesRows[0].validity_days) {
-        expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + Number(seriesRows[0].validity_days));
-      }
-      await connection.query(
-        `INSERT INTO test_series_enrollments
-          (user_id, test_series_id, payment_id, enrollment_type, status, expires_at)
-         VALUES (?, ?, ?, 'PAID', 'ACTIVE', ?)`,
-        [userId, testSeriesId, paymentId, expiresAt]
-      );
-    } else {
-      await connection.query(
-        "UPDATE test_series_enrollments SET status = 'ACTIVE' WHERE payment_id = ?",
-        [paymentId]
-      );
-    }
-  }
-
+async function activatePaidAccess(connection, { paymentId, userId, subscriptionId }) {
   if (subscriptionId) {
     await connection.query(
       "UPDATE subscriptions SET status = 'ACTIVE' WHERE id = ?",
@@ -52,7 +23,6 @@ async function createPayment(data) {
 
     const {
       user_id,
-      test_series_id = null,
       subscription_id = null,
       order_id = null,
       transaction_id = null,
@@ -73,24 +43,15 @@ async function createPayment(data) {
       throw err;
     }
 
-    if (test_series_id) {
-      const [series] = await connection.query('SELECT id FROM test_series WHERE id = ?', [test_series_id]);
-      if (series.length === 0) {
-        const err = new Error('Test series not found');
-        err.status = 404;
-        throw err;
-      }
-    }
-
     const resolvedPaidAt = status === 'SUCCESS' ? (paid_at || new Date()) : paid_at;
 
     const [result] = await connection.query(
       `INSERT INTO payments (
-         user_id, test_series_id, subscription_id, order_id, transaction_id,
+         user_id, subscription_id, order_id, transaction_id,
          amount, currency, payment_method, payment_gateway, status, paid_at, notes
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        user_id, test_series_id, subscription_id, order_id, transaction_id,
+        user_id, subscription_id, order_id, transaction_id,
         amount, currency, payment_method, payment_gateway, status, resolvedPaidAt, notes
       ]
     );
@@ -101,7 +62,6 @@ async function createPayment(data) {
       await activatePaidAccess(connection, {
         paymentId,
         userId: user_id,
-        testSeriesId: test_series_id,
         subscriptionId: subscription_id
       });
     }
@@ -111,7 +71,6 @@ async function createPayment(data) {
       await notificationModel.notifyPaymentConfirmed(connection, {
         userId: user_id,
         paymentId,
-        testSeriesId: test_series_id,
         amount,
         currency,
       });
@@ -162,7 +121,6 @@ async function updatePaymentStatus(id, data) {
       await activatePaidAccess(connection, {
         paymentId: id,
         userId: payment.user_id,
-        testSeriesId: payment.test_series_id,
         subscriptionId: payment.subscription_id
       });
     }
@@ -172,7 +130,6 @@ async function updatePaymentStatus(id, data) {
       await notificationModel.notifyPaymentConfirmed(connection, {
         userId: payment.user_id,
         paymentId: id,
-        testSeriesId: payment.test_series_id,
         amount: payment.amount,
         currency: payment.currency || 'INR',
       });
@@ -209,11 +166,6 @@ async function refundPayment(id, data = {}) {
       [refundAmount, refundReason, data.refunded_at || null, id]
     );
 
-    await connection.query(
-      "UPDATE test_series_enrollments SET status = 'CANCELLED' WHERE payment_id = ?",
-      [id]
-    );
-
     if (payment.subscription_id) {
       await connection.query(
         "UPDATE subscriptions SET status = 'CANCELLED' WHERE id = ?",
@@ -240,11 +192,9 @@ async function getAllPayments(filters = {}) {
         p.*,
         u.username,
         u.name AS user_name,
-        u.email AS user_email,
-        ts.title AS test_series_title
+        u.email AS user_email
       FROM payments p
       JOIN users u ON p.user_id = u.id
-      LEFT JOIN test_series ts ON p.test_series_id = ts.id
       WHERE 1=1
     `;
     const values = [];
@@ -256,10 +206,6 @@ async function getAllPayments(filters = {}) {
     if (filters.user_id) {
       query += ' AND p.user_id = ?';
       values.push(filters.user_id);
-    }
-    if (filters.test_series_id) {
-      query += ' AND p.test_series_id = ?';
-      values.push(filters.test_series_id);
     }
     if (filters.dateFrom && filters.dateTo) {
       query += ' AND p.created_at BETWEEN ? AND ?';
@@ -283,11 +229,9 @@ async function getPaymentById(id) {
          p.*,
          u.username,
          u.name AS user_name,
-         u.email AS user_email,
-         ts.title AS test_series_title
+         u.email AS user_email
        FROM payments p
        JOIN users u ON p.user_id = u.id
-       LEFT JOIN test_series ts ON p.test_series_id = ts.id
        WHERE p.id = ?`,
       [id]
     );
@@ -354,11 +298,9 @@ async function getAllSubscriptions(filters = {}) {
         s.*,
         u.username,
         u.name AS user_name,
-        u.email AS user_email,
-        ts.title AS test_series_title
+        u.email AS user_email
       FROM subscriptions s
       JOIN users u ON s.user_id = u.id
-      LEFT JOIN test_series ts ON s.test_series_id = ts.id
       WHERE 1=1
     `;
     const values = [];

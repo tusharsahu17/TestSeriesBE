@@ -7,6 +7,7 @@ async function initTestsAdmin() {
     connection = await createDbConnection();
 
     const columnsToAdd = [
+      'ADD COLUMN exam_id BIGINT NULL',
       'ADD COLUMN instructions TEXT',
       'ADD COLUMN negative_marking DECIMAL(5, 2) DEFAULT 0.00',
       'ADD COLUMN start_time DATETIME NULL',

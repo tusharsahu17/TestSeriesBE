@@ -105,6 +105,7 @@ async function setupDatabase() {
     await connection.query(`
       CREATE TABLE tests (
         id BIGINT PRIMARY KEY AUTO_INCREMENT,
+        exam_id BIGINT,
         subject_id BIGINT NOT NULL,
         name VARCHAR(200) NOT NULL,
         description TEXT,
@@ -119,6 +120,7 @@ async function setupDatabase() {
         display_order INT DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE SET NULL,
         FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE
       )
     `);
@@ -128,16 +130,21 @@ async function setupDatabase() {
     await connection.query(`
       CREATE TABLE questions (
         id BIGINT PRIMARY KEY AUTO_INCREMENT,
-        test_id BIGINT NOT NULL,
+        test_id BIGINT NULL,
         question_text TEXT NOT NULL,
         question_type VARCHAR(50) DEFAULT 'MCQ',
         marks DECIMAL(5,2) DEFAULT 1,
         negative_marks DECIMAL(5,2) DEFAULT 0,
         difficulty VARCHAR(50),
         explanation TEXT,
+        category VARCHAR(100) NULL,
+        subject VARCHAR(100) NULL,
+        topic VARCHAR(100) NULL,
+        subtopic VARCHAR(100) NULL,
+        tags VARCHAR(255) NULL,
         display_order INT DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE CASCADE
+        FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE SET NULL
       )
     `);
     console.log('Created table questions');

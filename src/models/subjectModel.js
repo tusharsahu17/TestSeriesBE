@@ -1,15 +1,23 @@
 const { createDbConnection } = require('../config/db');
 
-async function getTestsBySubjectId(subjectId) {
+async function getTestsBySubjectId(subjectId, filters = {}) {
   let connection;
   try {
     connection = await createDbConnection();
-    const [rows] = await connection.query(`
+    let query = `
       SELECT * 
       FROM tests 
       WHERE subject_id = ? AND is_active = TRUE
-      ORDER BY display_order ASC
-    `, [subjectId]);
+    `;
+    const values = [subjectId];
+    if (filters.is_published !== undefined) {
+      query += ' AND is_published = ?';
+      values.push(filters.is_published);
+    } else {
+      query += ' AND is_published = TRUE';
+    }
+    query += ' ORDER BY display_order ASC';
+    const [rows] = await connection.query(query, values);
     return rows;
   } finally {
     if (connection) await connection.end();
@@ -61,9 +69,26 @@ async function deleteSubject(id) {
   let connection;
   try {
     connection = await createDbConnection();
-    // Assuming cascading deletes or manual cleanup is needed, but we'll stick to a simple delete
+    await connection.beginTransaction();
+
+    // Unlink questions tied to tests of this subject before deleting subject so they remain in Question Bank
+    try {
+      await connection.query(`
+        UPDATE questions q
+        JOIN tests t ON q.test_id = t.id
+        SET q.test_id = NULL
+        WHERE t.subject_id = ?
+      `, [id]);
+    } catch (e) {
+      // Ignore if table/column difference
+    }
+
     await connection.query(`DELETE FROM subjects WHERE id = ?`, [id]);
+    await connection.commit();
     return true;
+  } catch (err) {
+    if (connection) await connection.rollback();
+    throw err;
   } finally {
     if (connection) await connection.end();
   }
