@@ -1,15 +1,23 @@
 const { createDbConnection } = require('../config/db');
 
-async function getTestsBySubjectId(subjectId) {
+async function getTestsBySubjectId(subjectId, filters = {}) {
   let connection;
   try {
     connection = await createDbConnection();
-    const [rows] = await connection.query(`
+    let query = `
       SELECT * 
       FROM tests 
       WHERE subject_id = ? AND is_active = TRUE
-      ORDER BY display_order ASC
-    `, [subjectId]);
+    `;
+    const values = [subjectId];
+    if (filters.is_published !== undefined) {
+      query += ' AND is_published = ?';
+      values.push(filters.is_published);
+    } else {
+      query += ' AND is_published = TRUE';
+    }
+    query += ' ORDER BY display_order ASC';
+    const [rows] = await connection.query(query, values);
     return rows;
   } finally {
     if (connection) await connection.end();

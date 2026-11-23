@@ -203,6 +203,11 @@ async function getAllTests(filters = {}) {
       values.push(filters.is_published);
     }
 
+    if (filters.is_active !== undefined) {
+      query += ' AND tests.is_active = ?';
+      values.push(filters.is_active);
+    }
+
     if (filters.exam_id) {
       query += ' AND tests.exam_id = ?';
       values.push(filters.exam_id);
