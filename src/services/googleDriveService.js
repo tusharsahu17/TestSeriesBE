@@ -129,16 +129,85 @@ async function deleteFromGoogleDrive(fileId) {
 }
 
 /**
- * Get readable stream for a file stored in Google Drive
+ * Stream a public Google Drive file directly without API credentials
  */
-async function getFileStreamFromGoogleDrive(fileId) {
+async function getPublicGoogleDriveStream(fileId, rangeHeader) {
   if (!fileId) throw new Error("Google Drive fileId is required");
-  const drive = getDriveClient();
-  const response = await drive.files.get(
-    { fileId, alt: "media", supportsAllDrives: true },
-    { responseType: "stream" }
-  );
-  return response.data;
+
+  const candidateUrls = [
+    `https://drive.usercontent.google.com/download?id=${fileId}&export=download`,
+    `https://drive.google.com/uc?export=download&id=${fileId}`,
+    `https://lh3.googleusercontent.com/d/${fileId}`,
+  ];
+
+  const headers = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    Accept: "*/*",
+  };
+
+  if (rangeHeader) {
+    headers["Range"] = rangeHeader;
+  }
+
+  for (const url of candidateUrls) {
+    try {
+      const response = await fetch(url, {
+        headers,
+        redirect: "follow",
+      });
+
+      if (!response.ok && response.status !== 206) continue;
+
+      const contentType = response.headers.get("content-type") || "";
+      // If it returned an HTML page (like a login or captcha page), skip to next candidate
+      if (contentType.toLowerCase().includes("text/html")) continue;
+
+      return {
+        stream: Readable.fromWeb(response.body),
+        status: response.status || 200,
+        contentLength: response.headers.get("content-length"),
+        contentRange: response.headers.get("content-range"),
+        contentType: contentType || "application/pdf",
+      };
+    } catch (err) {
+      console.warn(`Public Google Drive fetch attempt failed for ${url}:`, err.message);
+    }
+  }
+
+  throw new Error(`Failed to stream Google Drive file ${fileId} from public endpoints`);
+}
+
+/**
+ * Get readable stream for a file stored in Google Drive
+ * Attempts authenticated Drive API first, then falls back to public direct download stream
+ */
+async function getFileStreamFromGoogleDrive(fileId, rangeHeader) {
+  if (!fileId) throw new Error("Google Drive fileId is required");
+
+  // Attempt 1: Authenticated Google Drive API
+  try {
+    const drive = getDriveClient();
+    const headers = rangeHeader ? { Range: rangeHeader } : {};
+    const response = await drive.files.get(
+      { fileId, alt: "media", supportsAllDrives: true },
+      { responseType: "stream", headers }
+    );
+    return {
+      stream: response.data,
+      status: response.status || 200,
+      contentLength: response.headers && response.headers["content-length"],
+      contentRange: response.headers && response.headers["content-range"],
+      contentType: (response.headers && response.headers["content-type"]) || "application/pdf",
+    };
+  } catch (apiErr) {
+    console.warn(
+      `Drive API stream failed for file ${fileId} (${apiErr.message}), falling back to public download stream`
+    );
+  }
+
+  // Attempt 2: Public Google Drive stream (resilient fallback if API credentials are not set or expired)
+  return await getPublicGoogleDriveStream(fileId, rangeHeader);
 }
 
 /**

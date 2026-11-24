@@ -45,13 +45,14 @@ initTestsAdmin().catch(err => {
 });
 
 const app = express();
+app.enable('trust proxy');
 
 const corsOptions = {
   origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Range'],
-  exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Range', 'Content-Type'],
+  exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Range', 'Content-Type', 'Accept-Ranges'],
 };
 
 app.use(cors(corsOptions));

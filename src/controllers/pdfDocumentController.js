@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { Readable } = require("stream");
 const pdfCategoryModel = require("../models/pdfCategoryModel");
 const pdfDocumentModel = require("../models/pdfDocumentModel");
 const {
@@ -33,8 +34,8 @@ function getFullUrl(req, fileUrl) {
   if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://")) {
     return fileUrl;
   }
-  const protocol = req.protocol || "http";
-  const host = req.get("host") || "localhost:3000";
+  const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  const host = req.headers["x-forwarded-host"] || req.get("host") || "localhost:3000";
   return `${protocol}://${host}${fileUrl.startsWith("/") ? "" : "/"}${fileUrl}`;
 }
 
@@ -176,6 +177,8 @@ const getAllPdfsHandler = async (req, res) => {
       result.data = result.data.map((pdf) => ({
         ...pdf,
         fullUrl: getFullUrl(req, pdf.fileUrl),
+        viewFullUrl: getFullUrl(req, pdf.viewUrl || `/api/pdfs/${pdf.id}/view`),
+        downloadFullUrl: getFullUrl(req, pdf.downloadUrl || `/api/pdfs/${pdf.id}/download`),
       }));
       return res.json({
         success: true,
@@ -186,6 +189,8 @@ const getAllPdfsHandler = async (req, res) => {
     const formatted = result.map((pdf) => ({
       ...pdf,
       fullUrl: getFullUrl(req, pdf.fileUrl),
+      viewFullUrl: getFullUrl(req, pdf.viewUrl || `/api/pdfs/${pdf.id}/view`),
+      downloadFullUrl: getFullUrl(req, pdf.downloadUrl || `/api/pdfs/${pdf.id}/download`),
     }));
 
     return res.json({
@@ -215,6 +220,8 @@ const getPdfByIdHandler = async (req, res) => {
     }
 
     pdf.fullUrl = getFullUrl(req, pdf.fileUrl);
+    pdf.viewFullUrl = getFullUrl(req, pdf.viewUrl || `/api/pdfs/${pdf.id}/view`);
+    pdf.downloadFullUrl = getFullUrl(req, pdf.downloadUrl || `/api/pdfs/${pdf.id}/download`);
 
     return res.json({
       success: true,
@@ -262,18 +269,39 @@ function extractGoogleDriveFileId(filePath, fileUrl) {
  * Download or view a PDF inline (streams directly with CORS headers to avoid cross-origin blocking)
  */
 const downloadPdfHandler = async (req, res) => {
+  const origin = req.headers.origin || "*";
+
+  // Preflight check
+  if (req.method === "OPTIONS") {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, Range, Accept, X-Requested-With"
+    );
+    res.setHeader("Access-Control-Max-Age", "86400");
+    return res.sendStatus(204);
+  }
+
+  // Set essential CORS headers on all responses (including errors)
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, Range, Accept, X-Requested-With"
+  );
+  res.setHeader(
+    "Access-Control-Expose-Headers",
+    "Content-Disposition, Content-Length, Content-Range, Content-Type, Accept-Ranges"
+  );
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  res.setHeader("Accept-Ranges", "bytes");
+
   try {
     const { id } = req.params;
     const isInline = req.query.inline === "true" || req.path.endsWith("/view");
-
-    // Preflight check
-    if (req.method === "OPTIONS") {
-      res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
-      res.setHeader("Access-Control-Allow-Credentials", "true");
-      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Range, Accept");
-      return res.sendStatus(204);
-    }
 
     const pdf = await pdfDocumentModel.getPdfById(id);
     if (!pdf) {
@@ -283,13 +311,6 @@ const downloadPdfHandler = async (req, res) => {
     const filename = pdf.originalName || pdf.title || `document-${id}.pdf`;
     const encodedFilename = encodeURIComponent(filename);
 
-    // Set CORS, streaming, and content headers
-    res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Range, Accept");
-    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Range, Content-Type");
-    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     res.setHeader("Content-Type", pdf.mimeType || "application/pdf");
     res.setHeader(
       "Content-Disposition",
@@ -298,18 +319,41 @@ const downloadPdfHandler = async (req, res) => {
         : `attachment; filename="${encodedFilename}"; filename*=UTF-8''${encodedFilename}`
     );
 
-    // 1. If stored in Google Drive: stream binary directly to avoid 302 redirect CORS issues
+    // If HEAD request, respond without body
+    if (req.method === "HEAD") {
+      if (pdf.fileSize) res.setHeader("Content-Length", pdf.fileSize);
+      return res.sendStatus(200);
+    }
+
+    // 1. If stored in Google Drive: stream binary directly (handles API or public download fallback seamlessly)
     const driveFileId = extractGoogleDriveFileId(pdf.filePath, pdf.fileUrl);
     if (driveFileId) {
       try {
-        const stream = await getFileStreamFromGoogleDrive(driveFileId);
+        const driveResult = await getFileStreamFromGoogleDrive(
+          driveFileId,
+          req.headers.range
+        );
 
-        if (pdf.fileSize) {
+        if (driveResult.status) {
+          res.status(driveResult.status);
+        }
+        if (driveResult.contentLength) {
+          res.setHeader("Content-Length", driveResult.contentLength);
+        } else if (pdf.fileSize && !req.headers.range) {
           res.setHeader("Content-Length", pdf.fileSize);
         }
+        if (driveResult.contentRange) {
+          res.setHeader("Content-Range", driveResult.contentRange);
+        }
+        if (driveResult.contentType) {
+          res.setHeader("Content-Type", driveResult.contentType);
+        }
 
-        stream.on("error", (err) => {
-          console.error(`Google Drive stream error for file ${driveFileId}:`, err.message);
+        driveResult.stream.on("error", (err) => {
+          console.error(
+            `Google Drive stream error for file ${driveFileId}:`,
+            err.message
+          );
           if (!res.headersSent) {
             res.status(502).json({
               success: false,
@@ -322,14 +366,20 @@ const downloadPdfHandler = async (req, res) => {
         });
 
         req.on("close", () => {
-          if (stream && typeof stream.destroy === "function") {
-            stream.destroy();
+          if (
+            driveResult.stream &&
+            typeof driveResult.stream.destroy === "function"
+          ) {
+            driveResult.stream.destroy();
           }
         });
 
-        return stream.pipe(res);
+        return driveResult.stream.pipe(res);
       } catch (driveErr) {
-        console.error(`Failed to initiate Google Drive stream for ${driveFileId}:`, driveErr.message);
+        console.error(
+          `Failed to initiate Google Drive stream for ${driveFileId}:`,
+          driveErr.message
+        );
         // Fall through to try local disk or external URL fallback
       }
     }
@@ -337,10 +387,22 @@ const downloadPdfHandler = async (req, res) => {
     // 2. Fallback for legacy files stored on local disk
     if (pdf.filePath) {
       const candidates = [
-        path.isAbsolute(pdf.filePath) ? pdf.filePath : path.resolve(__dirname, "../../", pdf.filePath),
-        path.isAbsolute(pdf.filePath) ? pdf.filePath : path.resolve(__dirname, "../", pdf.filePath),
-        path.resolve(__dirname, "../../uploads/pdfs", path.basename(pdf.filePath)),
-        path.resolve(__dirname, "../uploads/pdfs", path.basename(pdf.filePath)),
+        path.isAbsolute(pdf.filePath)
+          ? pdf.filePath
+          : path.resolve(__dirname, "../../", pdf.filePath),
+        path.isAbsolute(pdf.filePath)
+          ? pdf.filePath
+          : path.resolve(__dirname, "../", pdf.filePath),
+        path.resolve(
+          __dirname,
+          "../../uploads/pdfs",
+          path.basename(pdf.filePath)
+        ),
+        path.resolve(
+          __dirname,
+          "../uploads/pdfs",
+          path.basename(pdf.filePath)
+        ),
       ];
 
       let resolvedDiskPath = candidates.find((c) => fs.existsSync(c));
@@ -359,32 +421,81 @@ const downloadPdfHandler = async (req, res) => {
 
       if (resolvedDiskPath) {
         const stat = fs.statSync(resolvedDiskPath);
+        const range = req.headers.range;
+
+        if (range) {
+          const parts = range.replace(/bytes=/, "").split("-");
+          const start = parseInt(parts[0], 10);
+          const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+          const chunksize = end - start + 1;
+
+          res.status(206);
+          res.setHeader("Content-Range", `bytes ${start}-${end}/${stat.size}`);
+          res.setHeader("Content-Length", chunksize);
+          const fileStream = fs.createReadStream(resolvedDiskPath, {
+            start,
+            end,
+          });
+          return fileStream.pipe(res);
+        }
+
         res.setHeader("Content-Length", stat.size);
         const fileStream = fs.createReadStream(resolvedDiskPath);
         return fileStream.pipe(res);
       }
     }
 
-    // 3. Fallback for generic remote HTTP/HTTPS URLs (stream to prevent CORS issues)
-    if (pdf.fileUrl && (pdf.fileUrl.startsWith("http://") || pdf.fileUrl.startsWith("https://"))) {
+    // 3. Fallback for generic remote HTTP/HTTPS URLs (stream directly, never 302 redirect)
+    if (
+      pdf.fileUrl &&
+      (pdf.fileUrl.startsWith("http://") || pdf.fileUrl.startsWith("https://"))
+    ) {
       try {
-        const remoteRes = await fetch(pdf.fileUrl);
-        if (remoteRes.ok) {
-          const arrayBuffer = await remoteRes.arrayBuffer();
-          res.setHeader("Content-Length", arrayBuffer.byteLength);
-          return res.send(Buffer.from(arrayBuffer));
+        const fetchHeaders = {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        };
+        if (req.headers.range) {
+          fetchHeaders["Range"] = req.headers.range;
+        }
+
+        const remoteRes = await fetch(pdf.fileUrl, {
+          headers: fetchHeaders,
+          redirect: "follow",
+        });
+
+        if (remoteRes.ok || remoteRes.status === 206) {
+          const contentType = remoteRes.headers.get("content-type") || "";
+          if (!contentType.toLowerCase().includes("text/html")) {
+            res.status(remoteRes.status);
+            if (remoteRes.headers.get("content-length")) {
+              res.setHeader(
+                "Content-Length",
+                remoteRes.headers.get("content-length")
+              );
+            }
+            if (remoteRes.headers.get("content-range")) {
+              res.setHeader(
+                "Content-Range",
+                remoteRes.headers.get("content-range")
+              );
+            }
+            if (contentType) {
+              res.setHeader("Content-Type", contentType);
+            }
+            const stream = Readable.fromWeb(remoteRes.body);
+            return stream.pipe(res);
+          }
         }
       } catch (remoteErr) {
         console.error("External URL fetch failed:", remoteErr.message);
       }
-
-      // Last resort redirect
-      return res.redirect(pdf.fileUrl);
     }
 
-    return res.status(404).json({
+    return res.status(502).json({
       success: false,
-      error: "File not found on server or storage",
+      error:
+        "Unable to retrieve PDF from storage. Please verify file availability.",
     });
   } catch (error) {
     console.error("Failed to serve PDF file:", error);
