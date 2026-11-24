@@ -5,12 +5,13 @@ const { Readable } = require("stream");
 function getDriveClient() {
   // Option A: OAuth2 Refresh Token (uses personal 5TB Google account storage)
   if (process.env.GOOGLE_REFRESH_TOKEN && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID.trim(),
-      process.env.GOOGLE_CLIENT_SECRET.trim()
-    );
+    const clientId = process.env.GOOGLE_CLIENT_ID.trim().replace(/^['"]|['"]$/g, '');
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET.trim().replace(/^['"]|['"]$/g, '');
+    const refreshToken = process.env.GOOGLE_REFRESH_TOKEN.trim().replace(/^[=\s"'"]+|[=\s"'"]+$/g, '');
+
+    const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
     oauth2Client.setCredentials({
-      refresh_token: process.env.GOOGLE_REFRESH_TOKEN.trim(),
+      refresh_token: refreshToken,
     });
     return google.drive({ version: "v3", auth: oauth2Client });
   }
