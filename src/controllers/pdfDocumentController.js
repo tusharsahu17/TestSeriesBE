@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const pdfCategoryModel = require("../models/pdfCategoryModel");
 const pdfDocumentModel = require("../models/pdfDocumentModel");
-const { uploadToGoogleDrive } = require("../services/googleDriveService");
+const { uploadToGoogleDrive, deleteFromGoogleDrive } = require("../services/googleDriveService");
 
 /**
  * Helper to delete a file from disk safely
@@ -25,6 +25,9 @@ function safeUnlink(filePath) {
  */
 function getFullUrl(req, fileUrl) {
   if (!fileUrl) return null;
+  if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://")) {
+    return fileUrl;
+  }
   const protocol = req.protocol || "http";
   const host = req.get("host") || "localhost:3000";
   return `${protocol}://${host}${fileUrl.startsWith("/") ? "" : "/"}${fileUrl}`;
@@ -234,6 +237,16 @@ const downloadPdfHandler = async (req, res) => {
       return res.status(404).json({ success: false, error: "PDF not found" });
     }
 
+    // If stored in Google Drive or external URL
+    if (pdf.fileUrl && (pdf.fileUrl.startsWith("http://") || pdf.fileUrl.startsWith("https://"))) {
+      if (isInline) {
+        return res.redirect(pdf.fileUrl);
+      }
+      const directDownloadUrl = `https://drive.google.com/uc?export=download&id=${pdf.filePath}`;
+      return res.redirect(directDownloadUrl);
+    }
+
+    // Fallback for legacy files stored on local disk
     const fullFilePath = path.isAbsolute(pdf.filePath)
       ? pdf.filePath
       : path.resolve(__dirname, "../../", pdf.filePath);
@@ -272,7 +285,7 @@ const updatePdfHandler = async (req, res) => {
     const existingPdf = await pdfDocumentModel.getPdfById(id);
 
     if (!existingPdf) {
-      if (req.file) safeUnlink(req.file.path);
+      if (req.file && req.file.path) safeUnlink(req.file.path);
       return res.status(404).json({ success: false, error: "PDF not found" });
     }
 
@@ -287,7 +300,7 @@ const updatePdfHandler = async (req, res) => {
     } else if (category_id) {
       const cat = await pdfCategoryModel.getCategoryById(category_id, false);
       if (!cat) {
-        if (req.file) safeUnlink(req.file.path);
+        if (req.file && req.file.path) safeUnlink(req.file.path);
         return res
           .status(404)
           .json({ success: false, error: "Category not found" });
@@ -301,19 +314,30 @@ const updatePdfHandler = async (req, res) => {
 
     // If replacement file uploaded
     if (req.file) {
-      const relativePath = path
-        .relative(path.resolve(__dirname, "../../"), req.file.path)
-        .replace(/\\/g, "/");
-      updateData.file_name = req.file.filename;
+      const driveResult = await uploadToGoogleDrive(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+      );
+
+      updateData.file_name = driveResult.fileName;
       updateData.original_name = req.file.originalname;
-      updateData.file_path = relativePath;
-      updateData.file_url = `/uploads/pdfs/${req.file.filename}`;
+      updateData.file_path = driveResult.fileId;
+      updateData.file_url = driveResult.webViewLink;
       updateData.file_size = req.file.size;
       updateData.mime_type = req.file.mimetype || "application/pdf";
 
-      // Delete the old file from disk
+      // Delete the old file from Google Drive or disk
       if (existingPdf.filePath) {
-        safeUnlink(existingPdf.filePath);
+        const fullOldPath = path.isAbsolute(existingPdf.filePath)
+          ? existingPdf.filePath
+          : path.resolve(__dirname, "../../", existingPdf.filePath);
+
+        if (fs.existsSync(fullOldPath)) {
+          safeUnlink(fullOldPath);
+        } else {
+          await deleteFromGoogleDrive(existingPdf.filePath);
+        }
       }
     }
 
@@ -326,7 +350,7 @@ const updatePdfHandler = async (req, res) => {
       data: updated,
     });
   } catch (error) {
-    if (req.file) safeUnlink(req.file.path);
+    if (req.file && req.file.path) safeUnlink(req.file.path);
     return res.status(500).json({
       success: false,
       error: "Failed to update PDF",
@@ -336,7 +360,7 @@ const updatePdfHandler = async (req, res) => {
 };
 
 /**
- * Delete PDF from DB and disk
+ * Delete PDF from DB and disk/Google Drive
  */
 const deletePdfHandler = async (req, res) => {
   try {
@@ -347,9 +371,17 @@ const deletePdfHandler = async (req, res) => {
       return res.status(404).json({ success: false, error: "PDF not found" });
     }
 
-    // Delete file from disk
+    // Delete file from disk if local, or Google Drive if remote
     if (deletedRecord.file_path) {
-      safeUnlink(deletedRecord.file_path);
+      const fullPath = path.isAbsolute(deletedRecord.file_path)
+        ? deletedRecord.file_path
+        : path.resolve(__dirname, "../../", deletedRecord.file_path);
+
+      if (fs.existsSync(fullPath)) {
+        safeUnlink(fullPath);
+      } else {
+        await deleteFromGoogleDrive(deletedRecord.file_path);
+      }
     }
 
     return res.json({

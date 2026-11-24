@@ -1,15 +1,41 @@
+require('dotenv').config();
 const { google } = require("googleapis");
 const { Readable } = require("stream");
 
-const auth = new google.auth.GoogleAuth({
-  credentials: {
-    client_email: process.env.GOOGLE_DRIVE_CLIENT_EMAIL,
-    private_key: process.env.GOOGLE_DRIVE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-  },
-  scopes: ["https://www.googleapis.com/auth/drive"],
-});
+function getDriveClient() {
+  const clientEmail = process.env.GOOGLE_DRIVE_CLIENT_EMAIL;
+  let privateKey = process.env.GOOGLE_DRIVE_PRIVATE_KEY;
 
-const drive = google.drive({ version: "v3", auth });
+  if (!clientEmail) {
+    throw new Error(
+      "Missing GOOGLE_DRIVE_CLIENT_EMAIL. Please set it in your .env or Vercel Environment Variables."
+    );
+  }
+
+  if (!privateKey) {
+    throw new Error(
+      "Missing GOOGLE_DRIVE_PRIVATE_KEY. Please set it in your .env or Vercel Environment Variables."
+    );
+  }
+
+  // Handle escaped newlines if passed as single-line string
+  privateKey = privateKey.replace(/\\n/g, "\n");
+
+  if (!privateKey.includes("-----BEGIN PRIVATE KEY-----")) {
+    throw new Error(
+      "Invalid GOOGLE_DRIVE_PRIVATE_KEY format. It must be the full RSA private key from your service account JSON (starting with '-----BEGIN PRIVATE KEY-----'), not the private_key_id."
+    );
+  }
+
+  const auth = new google.auth.JWT(
+    clientEmail,
+    null,
+    privateKey,
+    ["https://www.googleapis.com/auth/drive"]
+  );
+
+  return google.drive({ version: "v3", auth });
+}
 
 function bufferToStream(buffer) {
   const stream = new Readable();
@@ -24,8 +50,10 @@ function bufferToStream(buffer) {
 async function uploadToGoogleDrive(
   fileBuffer,
   originalName,
-  mimeType = "application/pdf",
+  mimeType = "application/pdf"
 ) {
+  const drive = getDriveClient();
+
   const fileMetadata = {
     name: `${Date.now()}-${originalName}`,
     parents: process.env.GOOGLE_DRIVE_FOLDER_ID
@@ -47,20 +75,26 @@ async function uploadToGoogleDrive(
   const fileId = response.data.id;
 
   // Make the file publicly viewable so students can view/download
-  await drive.permissions.create({
-    fileId,
-    requestBody: {
-      role: "reader",
-      type: "anyone",
-    },
-  });
+  try {
+    await drive.permissions.create({
+      fileId,
+      requestBody: {
+        role: "reader",
+        type: "anyone",
+      },
+    });
+  } catch (permError) {
+    console.warn("Warning setting public permission on Google Drive file:", permError.message);
+  }
 
   return {
     fileId,
     fileName: response.data.name,
-    // webViewLink: Preview in Google Drive viewer
-    webViewLink: response.data.webViewLink,
-    // Direct download / content link
+    // Google Drive web view preview link
+    webViewLink:
+      response.data.webViewLink ||
+      `https://drive.google.com/file/d/${fileId}/view?usp=sharing`,
+    // Direct download URL
     downloadUrl: `https://drive.google.com/uc?export=download&id=${fileId}`,
   };
 }
@@ -71,11 +105,12 @@ async function uploadToGoogleDrive(
 async function deleteFromGoogleDrive(fileId) {
   if (!fileId) return;
   try {
+    const drive = getDriveClient();
     await drive.files.delete({ fileId });
   } catch (error) {
     console.error(
       `Error deleting file ${fileId} from Google Drive:`,
-      error.message,
+      error.message
     );
   }
 }
