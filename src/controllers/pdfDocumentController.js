@@ -2,7 +2,12 @@ const fs = require("fs");
 const path = require("path");
 const pdfCategoryModel = require("../models/pdfCategoryModel");
 const pdfDocumentModel = require("../models/pdfDocumentModel");
-const { uploadToGoogleDrive, deleteFromGoogleDrive } = require("../services/googleDriveService");
+const {
+  uploadToGoogleDrive,
+  deleteFromGoogleDrive,
+  getFileStreamFromGoogleDrive,
+  getFileMetadataFromGoogleDrive,
+} = require("../services/googleDriveService");
 
 /**
  * Helper to delete a file from disk safely
@@ -225,49 +230,164 @@ const getPdfByIdHandler = async (req, res) => {
 };
 
 /**
- * Download or view a PDF inline
+ * Extract Google Drive fileId from filePath or fileUrl
+ */
+function extractGoogleDriveFileId(filePath, fileUrl) {
+  // If filePath looks like a Google Drive ID (not a path on disk and not ending in .pdf)
+  if (
+    filePath &&
+    typeof filePath === "string" &&
+    !filePath.includes("/") &&
+    !filePath.includes("\\") &&
+    !filePath.toLowerCase().endsWith(".pdf")
+  ) {
+    return filePath.trim();
+  }
+
+  // Check fileUrl or filePath for Google Drive URL patterns
+  const candidateUrls = [fileUrl, filePath].filter(
+    (u) => typeof u === "string" && u.includes("drive.google.com")
+  );
+  for (const url of candidateUrls) {
+    const match1 = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (match1 && match1[1]) return match1[1];
+    const match2 = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (match2 && match2[1]) return match2[1];
+  }
+
+  return null;
+}
+
+/**
+ * Download or view a PDF inline (streams directly with CORS headers to avoid cross-origin blocking)
  */
 const downloadPdfHandler = async (req, res) => {
   try {
     const { id } = req.params;
     const isInline = req.query.inline === "true" || req.path.endsWith("/view");
 
+    // Preflight check
+    if (req.method === "OPTIONS") {
+      res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Range, Accept");
+      return res.sendStatus(204);
+    }
+
     const pdf = await pdfDocumentModel.getPdfById(id);
     if (!pdf) {
       return res.status(404).json({ success: false, error: "PDF not found" });
     }
 
-    // If stored in Google Drive or external URL
-    if (pdf.fileUrl && (pdf.fileUrl.startsWith("http://") || pdf.fileUrl.startsWith("https://"))) {
-      if (isInline) {
-        return res.redirect(pdf.fileUrl);
+    const filename = pdf.originalName || pdf.title || `document-${id}.pdf`;
+    const encodedFilename = encodeURIComponent(filename);
+
+    // Set CORS, streaming, and content headers
+    res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Range, Accept");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Range, Content-Type");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.setHeader("Content-Type", pdf.mimeType || "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      isInline
+        ? `inline; filename="${encodedFilename}"; filename*=UTF-8''${encodedFilename}`
+        : `attachment; filename="${encodedFilename}"; filename*=UTF-8''${encodedFilename}`
+    );
+
+    // 1. If stored in Google Drive: stream binary directly to avoid 302 redirect CORS issues
+    const driveFileId = extractGoogleDriveFileId(pdf.filePath, pdf.fileUrl);
+    if (driveFileId) {
+      try {
+        const stream = await getFileStreamFromGoogleDrive(driveFileId);
+
+        if (pdf.fileSize) {
+          res.setHeader("Content-Length", pdf.fileSize);
+        }
+
+        stream.on("error", (err) => {
+          console.error(`Google Drive stream error for file ${driveFileId}:`, err.message);
+          if (!res.headersSent) {
+            res.status(502).json({
+              success: false,
+              error: "Failed to stream document from Google Drive",
+              details: err.message,
+            });
+          } else {
+            res.end();
+          }
+        });
+
+        req.on("close", () => {
+          if (stream && typeof stream.destroy === "function") {
+            stream.destroy();
+          }
+        });
+
+        return stream.pipe(res);
+      } catch (driveErr) {
+        console.error(`Failed to initiate Google Drive stream for ${driveFileId}:`, driveErr.message);
+        // Fall through to try local disk or external URL fallback
       }
-      const directDownloadUrl = `https://drive.google.com/uc?export=download&id=${pdf.filePath}`;
-      return res.redirect(directDownloadUrl);
     }
 
-    // Fallback for legacy files stored on local disk
-    const fullFilePath = path.isAbsolute(pdf.filePath)
-      ? pdf.filePath
-      : path.resolve(__dirname, "../../", pdf.filePath);
+    // 2. Fallback for legacy files stored on local disk
+    if (pdf.filePath) {
+      const candidates = [
+        path.isAbsolute(pdf.filePath) ? pdf.filePath : path.resolve(__dirname, "../../", pdf.filePath),
+        path.isAbsolute(pdf.filePath) ? pdf.filePath : path.resolve(__dirname, "../", pdf.filePath),
+        path.resolve(__dirname, "../../uploads/pdfs", path.basename(pdf.filePath)),
+        path.resolve(__dirname, "../uploads/pdfs", path.basename(pdf.filePath)),
+      ];
 
-    if (!fs.existsSync(fullFilePath)) {
-      return res
-        .status(404)
-        .json({ success: false, error: "File not found on server" });
+      let resolvedDiskPath = candidates.find((c) => fs.existsSync(c));
+
+      // If exact path not found, search uploads/pdfs for file ending with originalName
+      if (!resolvedDiskPath && pdf.originalName) {
+        const uploadsDir = path.resolve(__dirname, "../../uploads/pdfs");
+        if (fs.existsSync(uploadsDir)) {
+          const files = fs.readdirSync(uploadsDir);
+          const match = files.find((f) => f.endsWith(pdf.originalName));
+          if (match) {
+            resolvedDiskPath = path.join(uploadsDir, match);
+          }
+        }
+      }
+
+      if (resolvedDiskPath) {
+        const stat = fs.statSync(resolvedDiskPath);
+        res.setHeader("Content-Length", stat.size);
+        const fileStream = fs.createReadStream(resolvedDiskPath);
+        return fileStream.pipe(res);
+      }
     }
 
-    if (isInline) {
-      res.setHeader("Content-Type", pdf.mimeType || "application/pdf");
-      res.setHeader(
-        "Content-Disposition",
-        `inline; filename="${encodeURIComponent(pdf.originalName)}"`,
-      );
-      return res.sendFile(fullFilePath);
+    // 3. Fallback for generic remote HTTP/HTTPS URLs (stream to prevent CORS issues)
+    if (pdf.fileUrl && (pdf.fileUrl.startsWith("http://") || pdf.fileUrl.startsWith("https://"))) {
+      try {
+        const remoteRes = await fetch(pdf.fileUrl);
+        if (remoteRes.ok) {
+          const arrayBuffer = await remoteRes.arrayBuffer();
+          res.setHeader("Content-Length", arrayBuffer.byteLength);
+          return res.send(Buffer.from(arrayBuffer));
+        }
+      } catch (remoteErr) {
+        console.error("External URL fetch failed:", remoteErr.message);
+      }
+
+      // Last resort redirect
+      return res.redirect(pdf.fileUrl);
     }
 
-    return res.download(fullFilePath, pdf.originalName);
+    return res.status(404).json({
+      success: false,
+      error: "File not found on server or storage",
+    });
   } catch (error) {
+    console.error("Failed to serve PDF file:", error);
     return res.status(500).json({
       success: false,
       error: "Failed to serve file",

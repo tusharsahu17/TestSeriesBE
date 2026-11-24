@@ -128,7 +128,41 @@ async function deleteFromGoogleDrive(fileId) {
   }
 }
 
+/**
+ * Get readable stream for a file stored in Google Drive
+ */
+async function getFileStreamFromGoogleDrive(fileId) {
+  if (!fileId) throw new Error("Google Drive fileId is required");
+  const drive = getDriveClient();
+  const response = await drive.files.get(
+    { fileId, alt: "media", supportsAllDrives: true },
+    { responseType: "stream" }
+  );
+  return response.data;
+}
+
+/**
+ * Get file metadata from Google Drive
+ */
+async function getFileMetadataFromGoogleDrive(fileId) {
+  if (!fileId) return null;
+  try {
+    const drive = getDriveClient();
+    const response = await drive.files.get({
+      fileId,
+      fields: "id, name, mimeType, size",
+      supportsAllDrives: true,
+    });
+    return response.data;
+  } catch (err) {
+    console.warn(`Could not fetch metadata for Google Drive file ${fileId}:`, err.message);
+    return null;
+  }
+}
+
 module.exports = {
   uploadToGoogleDrive,
   deleteFromGoogleDrive,
+  getFileStreamFromGoogleDrive,
+  getFileMetadataFromGoogleDrive,
 };

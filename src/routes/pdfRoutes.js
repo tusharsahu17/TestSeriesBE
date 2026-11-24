@@ -155,6 +155,7 @@ router.get('/:id', pdfDocumentController.getPdfByIdHandler);
  *         description: PDF not found
  */
 router.get('/:id/download', pdfDocumentController.downloadPdfHandler);
+router.options('/:id/download', pdfDocumentController.downloadPdfHandler);
 
 /**
  * @swagger
@@ -180,6 +181,7 @@ router.get('/:id/download', pdfDocumentController.downloadPdfHandler);
  *         description: PDF not found
  */
 router.get('/:id/view', pdfDocumentController.downloadPdfHandler);
+router.options('/:id/view', pdfDocumentController.downloadPdfHandler);
 
 /**
  * @swagger

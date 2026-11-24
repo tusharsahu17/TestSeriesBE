@@ -46,14 +46,28 @@ initTestsAdmin().catch(err => {
 
 const app = express();
 
-app.use(cors({
+const corsOptions = {
   origin: true,
   credentials: true,
-}));
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Range'],
+  exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Range', 'Content-Type'],
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
-// Serve uploaded static files
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Serve uploaded static files with CORS & cross-origin resource policy
+app.use(
+  '/uploads',
+  express.static(path.join(__dirname, '../uploads'), {
+    setHeaders: (res) => {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    },
+  })
+);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/exams', examRoutes);
