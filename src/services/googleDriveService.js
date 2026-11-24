@@ -3,36 +3,46 @@ const { google } = require("googleapis");
 const { Readable } = require("stream");
 
 function getDriveClient() {
-  const clientEmail = process.env.GOOGLE_DRIVE_CLIENT_EMAIL;
-  let privateKey = process.env.GOOGLE_DRIVE_PRIVATE_KEY;
+  // Option A: OAuth2 Refresh Token (uses personal 5TB Google account storage)
+  if (process.env.GOOGLE_REFRESH_TOKEN && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID.trim(),
+      process.env.GOOGLE_CLIENT_SECRET.trim()
+    );
+    oauth2Client.setCredentials({
+      refresh_token: process.env.GOOGLE_REFRESH_TOKEN.trim(),
+    });
+    return google.drive({ version: "v3", auth: oauth2Client });
+  }
 
-  if (!clientEmail) {
+  // Option B: Service Account (uses Google Workspace Shared Drive)
+  const clientEmail = process.env.GOOGLE_DRIVE_CLIENT_EMAIL?.trim();
+  let rawKey = process.env.GOOGLE_DRIVE_PRIVATE_KEY;
+
+  if (!clientEmail || !rawKey) {
     throw new Error(
-      "Missing GOOGLE_DRIVE_CLIENT_EMAIL. Please set it in your .env or Vercel Environment Variables."
+      "Missing Google Drive credentials. Please provide either Service Account (GOOGLE_DRIVE_CLIENT_EMAIL & GOOGLE_DRIVE_PRIVATE_KEY) or OAuth2 (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, & GOOGLE_REFRESH_TOKEN)."
     );
   }
 
-  if (!privateKey) {
-    throw new Error(
-      "Missing GOOGLE_DRIVE_PRIVATE_KEY. Please set it in your .env or Vercel Environment Variables."
-    );
-  }
-
-  // Handle escaped newlines if passed as single-line string
-  privateKey = privateKey.replace(/\\n/g, "\n");
+  // Clean trailing quotes, commas from copy-pasting JSON, and normalize newlines
+  let privateKey = rawKey.trim();
+  if (privateKey.endsWith('",')) privateKey = privateKey.slice(0, -2);
+  if (privateKey.endsWith('"')) privateKey = privateKey.slice(0, -1);
+  if (privateKey.startsWith('"')) privateKey = privateKey.slice(1);
+  privateKey = privateKey.replace(/\\n/g, "\n").trim();
 
   if (!privateKey.includes("-----BEGIN PRIVATE KEY-----")) {
     throw new Error(
-      "Invalid GOOGLE_DRIVE_PRIVATE_KEY format. It must be the full RSA private key from your service account JSON (starting with '-----BEGIN PRIVATE KEY-----'), not the private_key_id."
+      "Invalid GOOGLE_DRIVE_PRIVATE_KEY format. It must be the full RSA private key from your service account JSON (starting with '-----BEGIN PRIVATE KEY-----')."
     );
   }
 
-  const auth = new google.auth.JWT(
-    clientEmail,
-    null,
-    privateKey,
-    ["https://www.googleapis.com/auth/drive"]
-  );
+  const auth = new google.auth.JWT({
+    email: clientEmail,
+    key: privateKey,
+    scopes: ["https://www.googleapis.com/auth/drive"],
+  });
 
   return google.drive({ version: "v3", auth });
 }
@@ -70,6 +80,7 @@ async function uploadToGoogleDrive(
     requestBody: fileMetadata,
     media,
     fields: "id, name, webViewLink, webContentLink",
+    supportsAllDrives: true,
   });
 
   const fileId = response.data.id;
@@ -82,6 +93,7 @@ async function uploadToGoogleDrive(
         role: "reader",
         type: "anyone",
       },
+      supportsAllDrives: true,
     });
   } catch (permError) {
     console.warn("Warning setting public permission on Google Drive file:", permError.message);
@@ -106,7 +118,7 @@ async function deleteFromGoogleDrive(fileId) {
   if (!fileId) return;
   try {
     const drive = getDriveClient();
-    await drive.files.delete({ fileId });
+    await drive.files.delete({ fileId, supportsAllDrives: true });
   } catch (error) {
     console.error(
       `Error deleting file ${fileId} from Google Drive:`,
