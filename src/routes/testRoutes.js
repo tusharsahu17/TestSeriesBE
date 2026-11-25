@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const testController = require('../controllers/testController');
-const { optionalAuthenticateToken } = require('../middleware/authMiddleware');
+const { authenticateToken } = require('../middleware/authMiddleware');
 
 /**
  * @swagger
@@ -9,6 +9,44 @@ const { optionalAuthenticateToken } = require('../middleware/authMiddleware');
  *   name: Tests
  *   description: Test and questions APIs
  */
+
+/**
+ * @swagger
+ * /api/tests:
+ *   get:
+ *     summary: List published active tests (filtered by exam_id, subject_id, topic_id, subtopic_id, test_type, search)
+ *     tags: [Tests]
+ *     parameters:
+ *       - in: query
+ *         name: exam_id
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: subject_id
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: topic_id
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: subtopic_id
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: test_type
+ *         schema:
+ *           type: string
+ *           description: e.g. topic_wise, subject_wise, full_length
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of published active tests
+ */
+router.get('/', testController.listTests);
 
 /**
  * @swagger
@@ -76,6 +114,6 @@ router.get('/:testId/questions', testController.getTestQuestions);
  *       200:
  *         description: Returns the attemptId
  */
-router.post('/:testId/start', optionalAuthenticateToken, testController.startTest);
+router.post('/:testId/start', authenticateToken, testController.startTest);
 
 module.exports = router;

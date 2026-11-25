@@ -1,4 +1,5 @@
 const examModel = require('../models/examModel');
+const hierarchyModel = require('../models/adminSubjectHierarchyModel');
 
 async function getAllExams(req, res) {
   try {
@@ -107,8 +108,24 @@ async function getExamTests(req, res) {
       // Default to active tests only for student/public endpoint
       filters.is_active = true;
     }
+    if (req.query.subject_id) filters.subject_id = req.query.subject_id;
+    if (req.query.topic_id) filters.topic_id = req.query.topic_id;
+    if (req.query.subtopic_id) filters.subtopic_id = req.query.subtopic_id;
+    if (req.query.test_type) filters.test_type = req.query.test_type;
+    if (req.query.search) filters.search = req.query.search;
     const tests = await examModel.getTestsForExam(examId, filters);
     res.json(tests);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function getExamHierarchy(req, res) {
+  try {
+    const examId = req.params.examId || req.params.id;
+    const hierarchy = await hierarchyModel.getFullHierarchyByExam(examId, { studentView: true });
+    if (!hierarchy) return res.status(404).json({ error: 'Exam not found' });
+    res.json(hierarchy);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -123,5 +140,6 @@ module.exports = {
   getExamSubjects,
   addSubjectToExam,
   removeSubjectFromExam,
-  getExamTests
+  getExamTests,
+  getExamHierarchy
 };

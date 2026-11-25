@@ -1,6 +1,8 @@
 const hierarchyModel = require('../models/adminSubjectHierarchyModel');
 
+// -----------------------------------------
 // Topics
+// -----------------------------------------
 const createTopicHandler = async (req, res) => {
   try {
     const { subjectId } = req.params;
@@ -44,7 +46,21 @@ const listTopicsHandler = async (req, res) => {
   }
 };
 
+const getTopicDetailsHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const topic = await hierarchyModel.getTopicById(id);
+    if (!topic) return res.status(404).json({ error: 'Topic not found' });
+    const subtopics = await hierarchyModel.getSubtopicsByTopic(id);
+    res.json({ ...topic, subtopics });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch topic details', details: error.message });
+  }
+};
+
+// -----------------------------------------
 // Subtopics
+// -----------------------------------------
 const createSubtopicHandler = async (req, res) => {
   try {
     const { topicId } = req.params;
@@ -88,13 +104,71 @@ const listSubtopicsHandler = async (req, res) => {
   }
 };
 
+const getSubtopicDetailsHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const subtopic = await hierarchyModel.getSubtopicById(id);
+    if (!subtopic) return res.status(404).json({ error: 'Subtopic not found' });
+    res.json(subtopic);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch subtopic details', details: error.message });
+  }
+};
+
+// -----------------------------------------
+// Hierarchies & Topic Tests
+// -----------------------------------------
+const getSubjectHierarchyHandler = async (req, res) => {
+  try {
+    const { subjectId } = req.params;
+    const isAdmin = Boolean(req.baseUrl && req.baseUrl.includes('/admin'));
+    const hierarchy = await hierarchyModel.getFullHierarchyBySubject(subjectId, { studentView: !isAdmin });
+    if (!hierarchy) return res.status(404).json({ error: 'Subject not found' });
+    res.json(hierarchy);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch subject hierarchy', details: error.message });
+  }
+};
+
+const getExamHierarchyHandler = async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const isAdmin = Boolean(req.baseUrl && req.baseUrl.includes('/admin'));
+    const hierarchy = await hierarchyModel.getFullHierarchyByExam(examId, { studentView: !isAdmin });
+    if (!hierarchy) return res.status(404).json({ error: 'Exam not found' });
+    res.json(hierarchy);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch exam hierarchy', details: error.message });
+  }
+};
+
+const getTopicTestsHandler = async (req, res) => {
+  try {
+    const { topicId } = req.params;
+    const { is_published, exam_id } = req.query;
+    const filters = {};
+    if (is_published !== undefined) filters.is_published = is_published === 'true';
+    if (exam_id) filters.exam_id = exam_id;
+
+    const tests = await hierarchyModel.getTestsByTopic(topicId, filters);
+    res.json(tests);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch tests for topic', details: error.message });
+  }
+};
+
 module.exports = {
   createTopicHandler,
   updateTopicHandler,
   deleteTopicHandler,
   listTopicsHandler,
+  getTopicDetailsHandler,
   createSubtopicHandler,
   updateSubtopicHandler,
   deleteSubtopicHandler,
-  listSubtopicsHandler
+  listSubtopicsHandler,
+  getSubtopicDetailsHandler,
+  getSubjectHierarchyHandler,
+  getExamHierarchyHandler,
+  getTopicTestsHandler
 };

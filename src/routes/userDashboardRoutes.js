@@ -63,6 +63,26 @@ router.get('/dashboard/summary', studentDashboardController.getDashboardSummary)
  *           type: integer
  *         description: Filter available tests by exam ID
  *       - in: query
+ *         name: subject_id
+ *         schema:
+ *           type: integer
+ *         description: Filter available tests by subject ID
+ *       - in: query
+ *         name: topic_id
+ *         schema:
+ *           type: integer
+ *         description: Filter available tests by topic ID
+ *       - in: query
+ *         name: subtopic_id
+ *         schema:
+ *           type: integer
+ *         description: Filter available tests by subtopic ID
+ *       - in: query
+ *         name: test_type
+ *         schema:
+ *           type: string
+ *         description: Filter available tests by test type (e.g. topic_wise, subject_wise, full_length)
+ *       - in: query
  *         name: bucket
  *         schema:
  *           type: string
@@ -127,6 +147,16 @@ router.get('/dashboard/recent-attempts', studentDashboardController.getRecentAtt
  *         name: subject
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: topic_id
+ *         schema:
+ *           type: integer
+ *         description: Filter performance analytics by topic ID
+ *       - in: query
+ *         name: test_type
+ *         schema:
+ *           type: string
+ *         description: Filter performance analytics by test type
  *     responses:
  *       200:
  *         description: Student performance analytics
@@ -162,6 +192,26 @@ router.get('/dashboard/notifications', studentDashboardController.getDashboardNo
  *         schema:
  *           type: integer
  *         description: Filter tests by exam ID
+ *       - in: query
+ *         name: subject_id
+ *         schema:
+ *           type: integer
+ *         description: Filter tests by subject ID
+ *       - in: query
+ *         name: topic_id
+ *         schema:
+ *           type: integer
+ *         description: Filter tests by topic ID
+ *       - in: query
+ *         name: subtopic_id
+ *         schema:
+ *           type: integer
+ *         description: Filter tests by subtopic ID
+ *       - in: query
+ *         name: test_type
+ *         schema:
+ *           type: string
+ *         description: Filter tests by test type (e.g. topic_wise, subject_wise, full_length)
  *       - in: query
  *         name: bucket
  *         schema:

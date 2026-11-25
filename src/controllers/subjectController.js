@@ -12,6 +12,11 @@ async function getSubjectTests(req, res) {
       // Default to published tests only for student/public endpoint
       filters.is_published = true;
     }
+    if (req.query.exam_id) filters.exam_id = req.query.exam_id;
+    if (req.query.topic_id) filters.topic_id = req.query.topic_id;
+    if (req.query.subtopic_id) filters.subtopic_id = req.query.subtopic_id;
+    if (req.query.test_type) filters.test_type = req.query.test_type;
+    if (req.query.search) filters.search = req.query.search;
     const tests = await subjectModel.getTestsBySubjectId(req.params.subjectId, filters);
     res.json(tests);
   } catch (error) {

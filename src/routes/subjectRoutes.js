@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const subjectController = require('../controllers/subjectController');
+const adminSubjectHierarchyController = require('../controllers/adminSubjectHierarchyController');
 
 /**
  * @swagger
@@ -106,6 +107,40 @@ router.delete('/:id', subjectController.deleteSubject);
  */
 router.get('/:subjectId/tests', subjectController.getSubjectTests);
 
+/**
+ * @swagger
+ * /api/subjects/{subjectId}/topics:
+ *   get:
+ *     summary: Get all topics for a subject
+ *     tags: [Subjects]
+ *     parameters:
+ *       - in: path
+ *         name: subjectId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: List of topics
+ */
+router.get('/:subjectId/topics', adminSubjectHierarchyController.listTopicsHandler);
 
+/**
+ * @swagger
+ * /api/subjects/{subjectId}/hierarchy:
+ *   get:
+ *     summary: Get full hierarchy of a subject (topics + subtopics)
+ *     tags: [Subjects]
+ *     parameters:
+ *       - in: path
+ *         name: subjectId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Full subject hierarchy
+ */
+router.get('/:subjectId/hierarchy', adminSubjectHierarchyController.getSubjectHierarchyHandler);
 
 module.exports = router;

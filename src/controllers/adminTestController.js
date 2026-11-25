@@ -46,10 +46,16 @@ const deleteTestHandler = async (req, res) => {
 
 const listTestsHandler = async (req, res) => {
   try {
-    const { is_published, exam_id } = req.query;
+    const { is_published, is_active, exam_id, subject_id, topic_id, subtopic_id, test_type, search } = req.query;
     const filters = {};
-    if (is_published !== undefined) filters.is_published = is_published === 'true';
+    if (is_published !== undefined && is_published !== 'all') filters.is_published = is_published === 'true';
+    if (is_active !== undefined && is_active !== 'all') filters.is_active = is_active === 'true';
     if (exam_id !== undefined && exam_id !== '') filters.exam_id = exam_id;
+    if (subject_id !== undefined && subject_id !== '') filters.subject_id = subject_id;
+    if (topic_id !== undefined && topic_id !== '') filters.topic_id = topic_id;
+    if (subtopic_id !== undefined && subtopic_id !== '') filters.subtopic_id = subtopic_id;
+    if (test_type !== undefined && test_type !== '') filters.test_type = test_type;
+    if (search !== undefined && search !== '') filters.search = search;
 
     const tests = await testModel.getAllTests(filters);
     res.json(tests);
@@ -106,6 +112,73 @@ const togglePublishHandler = async (req, res) => {
   }
 };
 
+// -------------------------------------------------------------
+// Question Management Handlers for Admin Tests (Step 6 of Flow)
+// -------------------------------------------------------------
+
+const addQuestionsToTestHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const questionIds = req.body.question_ids || req.body.questionIds || (req.body.questionId ? [req.body.questionId] : []);
+
+    if (!Array.isArray(questionIds) || questionIds.length === 0) {
+      return res.status(400).json({ error: 'question_ids array or questionId is required' });
+    }
+
+    const result = await testModel.addQuestionsToTest(id, questionIds);
+    res.status(200).json({
+      message: `Successfully added ${result.added} question(s) to test`,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to add questions to test', details: error.message });
+  }
+};
+
+const removeQuestionFromTestHandler = async (req, res) => {
+  try {
+    const { id, questionId } = req.params;
+    const result = await testModel.removeQuestionFromTest(id, questionId);
+    res.json({ message: 'Question removed from test successfully', ...result });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to remove question from test', details: error.message });
+  }
+};
+
+const getTestQuestionsHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const questions = await testModel.getQuestionsForTest(id);
+    res.json({ count: questions.length, questions });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch test questions', details: error.message });
+  }
+};
+
+const reorderTestQuestionsHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { orders } = req.body;
+    if (!Array.isArray(orders)) {
+      return res.status(400).json({ error: 'orders array is required with { question_id, order }' });
+    }
+    await testModel.reorderTestQuestions(id, orders);
+    res.json({ message: 'Questions reordered successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to reorder questions', details: error.message });
+  }
+};
+
+const autoPopulateQuestionsHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await testModel.autoPopulateFromQuestionBank(id, req.body || {});
+    res.json({ message: `Auto-populated ${result.added} questions from Question Bank`, ...result });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to auto-populate questions', details: error.message });
+  }
+};
+
 module.exports = {
   createTestHandler,
   updateTestHandler,
@@ -113,5 +186,10 @@ module.exports = {
   listTestsHandler,
   getTestDetailsHandler,
   duplicateTestHandler,
-  togglePublishHandler
+  togglePublishHandler,
+  addQuestionsToTestHandler,
+  removeQuestionFromTestHandler,
+  getTestQuestionsHandler,
+  reorderTestQuestionsHandler,
+  autoPopulateQuestionsHandler
 };

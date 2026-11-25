@@ -196,4 +196,22 @@ router.delete('/:examId/subjects/:subjectId', examController.removeSubjectFromEx
  */
 router.get('/:examId/tests', examController.getExamTests);
 
+/**
+ * @swagger
+ * /api/exams/{examId}/hierarchy:
+ *   get:
+ *     summary: Get complete hierarchy for an exam (Exam -> Subjects -> Topics -> Subtopics with test counts)
+ *     tags: [Exams]
+ *     parameters:
+ *       - in: path
+ *         name: examId
+ *         schema:
+ *           type: integer
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Full exam hierarchy
+ */
+router.get('/:examId/hierarchy', examController.getExamHierarchy);
+
 module.exports = router;

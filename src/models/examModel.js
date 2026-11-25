@@ -183,12 +183,22 @@ async function getSubjectsForExam(examId) {
   try {
     connection = await createDbConnection();
     const [rows] = await connection.query(`
-      SELECT s.*, es.display_order 
+      SELECT 
+        s.*, 
+        es.display_order,
+        (SELECT COUNT(*) FROM topics WHERE subject_id = s.id AND is_active = TRUE) AS topics_count,
+        (SELECT COUNT(DISTINCT test_id) FROM (
+          SELECT id AS test_id FROM tests WHERE subject_id = s.id AND (exam_id = ? OR exam_id IS NULL) AND is_active = TRUE AND is_published = TRUE
+          UNION
+          SELECT tt.test_id FROM test_topics tt 
+          JOIN tests tst ON tst.id = tt.test_id 
+          WHERE tst.subject_id = s.id AND (tst.exam_id = ? OR tst.exam_id IS NULL) AND tst.is_active = TRUE AND tst.is_published = TRUE
+        ) ct) AS tests_count
       FROM subjects s 
       JOIN exam_subjects es ON s.id = es.subject_id 
       WHERE es.exam_id = ? AND s.is_active = TRUE
-      ORDER BY es.display_order ASC
-    `, [examId]);
+      ORDER BY es.display_order ASC, s.id ASC
+    `, [examId, examId, examId]);
     return rows;
   } finally {
     if (connection) await connection.end();

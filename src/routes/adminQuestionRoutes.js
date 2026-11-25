@@ -51,6 +51,12 @@ const upload = multer({ storage: multer.memoryStorage() });
  *                 type: string
  *               subtopic:
  *                 type: string
+ *               subject_id:
+ *                 type: integer
+ *               topic_id:
+ *                 type: integer
+ *               subtopic_id:
+ *                 type: integer
  *               tags:
  *                 type: string
  *               options:
@@ -95,6 +101,18 @@ router.post('/', adminQuestionController.createQuestionHandler);
  *         name: topic
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: topic_id
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: subtopic_id
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: subject_id
+ *         schema:
+ *           type: integer
  *       - in: query
  *         name: difficulty
  *         schema:
@@ -173,6 +191,12 @@ router.get('/:id', adminQuestionController.getQuestionDetailsHandler);
  *                 type: string
  *               subtopic:
  *                 type: string
+ *               subject_id:
+ *                 type: integer
+ *               topic_id:
+ *                 type: integer
+ *               subtopic_id:
+ *                 type: integer
  *               tags:
  *                 type: string
  *               options:

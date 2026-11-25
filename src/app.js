@@ -26,23 +26,21 @@ const pdfCategoryRoutes = require('./routes/pdfCategoryRoutes');
 const { initPdfTables } = require('./config/initPdf');
 const { initQuestionBankAdmin } = require('./config/initQuestionBankAdmin');
 const { initTestsAdmin } = require('./config/initTestsAdmin');
+const { initTopicWiseTests } = require('./config/initTopicWiseTests');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
 
-// Ensure PDF tables exist automatically
-initPdfTables().catch(err => {
-  console.warn('PDF tables auto-init warning:', err.message);
-});
-
-// Ensure Question Bank schema and ON DELETE SET NULL foreign key constraint exist
-initQuestionBankAdmin().catch(err => {
-  console.warn('Question bank auto-init warning:', err.message);
-});
-
-// Ensure tests table schema (including exam_id) exists automatically
-initTestsAdmin().catch(err => {
-  console.warn('Tests table auto-init warning:', err.message);
-});
+// Ensure schemas, hierarchy, test_topics, and constraints exist sequentially without DDL deadlocks
+(async () => {
+  try {
+    await initPdfTables();
+    await initQuestionBankAdmin();
+    await initTestsAdmin();
+    await initTopicWiseTests();
+  } catch (err) {
+    console.warn('Database auto-init warning:', err.message);
+  }
+})();
 
 const app = express();
 app.enable('trust proxy');
@@ -89,6 +87,8 @@ app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/admin/enrollments', adminEnrollmentRoutes);
 app.use('/api/admin/payments', adminPaymentRoutes);
+app.use('/api/admin/exams', examRoutes);
+app.use('/api/admin/subjects', subjectRoutes);
 app.use('/api/admin/tests', adminTestRoutes);
 app.use('/api/admin/questions', adminQuestionRoutes);
 app.use('/api/admin/hierarchy', adminSubjectHierarchyRoutes);

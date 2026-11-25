@@ -14,8 +14,12 @@ async function setupDatabase() {
       'attempt_answers',
       'test_attempts',
       'question_options',
+      'test_questions',
       'questions',
+      'test_topics',
       'tests',
+      'subtopics',
+      'topics',
       'exam_subjects',
       'subjects',
       'exams',
@@ -101,36 +105,97 @@ async function setupDatabase() {
     `);
     console.log('Created table exam_subjects');
 
+    // 4b. Create topics table
+    await connection.query(`
+      CREATE TABLE topics (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        subject_id BIGINT NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('Created table topics');
+
+    // 4c. Create subtopics table
+    await connection.query(`
+      CREATE TABLE subtopics (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        topic_id BIGINT NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('Created table subtopics');
+
     // 5. Create tests table
     await connection.query(`
       CREATE TABLE tests (
         id BIGINT PRIMARY KEY AUTO_INCREMENT,
         exam_id BIGINT,
         subject_id BIGINT NOT NULL,
+        topic_id BIGINT NULL,
+        subtopic_id BIGINT NULL,
         name VARCHAR(200) NOT NULL,
         description TEXT,
         duration_minutes INT,
-        total_questions INT,
-        total_marks INT,
+        total_questions INT DEFAULT 0,
+        total_marks INT DEFAULT 0,
         passing_marks INT,
         difficulty VARCHAR(50),
-        test_type VARCHAR(50),
+        test_type VARCHAR(50) DEFAULT 'topic_wise',
         is_free BOOLEAN DEFAULT TRUE,
         is_active BOOLEAN DEFAULT TRUE,
         display_order INT DEFAULT 0,
+        instructions TEXT,
+        negative_marking DECIMAL(5,2) DEFAULT 0.00,
+        start_time DATETIME NULL,
+        end_time DATETIME NULL,
+        max_attempts INT DEFAULT 1,
+        randomize_questions BOOLEAN DEFAULT FALSE,
+        randomize_options BOOLEAN DEFAULT FALSE,
+        navigation_settings VARCHAR(50) DEFAULT 'free',
+        auto_submit BOOLEAN DEFAULT TRUE,
+        is_published BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE SET NULL,
-        FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE
+        FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
+        FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE SET NULL,
+        FOREIGN KEY (subtopic_id) REFERENCES subtopics(id) ON DELETE SET NULL
       )
     `);
     console.log('Created table tests');
+
+    // 5b. Create test_topics junction table (for multi-topic tests)
+    await connection.query(`
+      CREATE TABLE test_topics (
+        id BIGINT PRIMARY KEY AUTO_INCREMENT,
+        test_id BIGINT NOT NULL,
+        topic_id BIGINT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE CASCADE,
+        FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE,
+        UNIQUE KEY uq_test_topic (test_id, topic_id)
+      )
+    `);
+    console.log('Created table test_topics');
 
     // 6. Create questions table
     await connection.query(`
       CREATE TABLE questions (
         id BIGINT PRIMARY KEY AUTO_INCREMENT,
         test_id BIGINT NULL,
+        subject_id BIGINT NULL,
+        topic_id BIGINT NULL,
+        subtopic_id BIGINT NULL,
         question_text TEXT NOT NULL,
         question_type VARCHAR(50) DEFAULT 'MCQ',
         marks DECIMAL(5,2) DEFAULT 1,
@@ -144,10 +209,29 @@ async function setupDatabase() {
         tags VARCHAR(255) NULL,
         display_order INT DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE SET NULL
+        FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE SET NULL,
+        FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE SET NULL,
+        FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE SET NULL,
+        FOREIGN KEY (subtopic_id) REFERENCES subtopics(id) ON DELETE SET NULL
       )
     `);
     console.log('Created table questions');
+
+    // 6b. Create test_questions junction table (Question Bank mapping)
+    await connection.query(`
+      CREATE TABLE test_questions (
+        id BIGINT PRIMARY KEY AUTO_INCREMENT,
+        test_id BIGINT NOT NULL,
+        question_id BIGINT NOT NULL,
+        question_order INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE CASCADE,
+        FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE,
+        UNIQUE KEY uq_test_question (test_id, question_id)
+      )
+    `);
+    console.log('Created table test_questions');
 
     // 7. Create question_options table
     await connection.query(`
