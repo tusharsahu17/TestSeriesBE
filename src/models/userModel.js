@@ -147,6 +147,10 @@ const updateUserDetails = async (userId, details) => {
     const fields = [];
     const values = [];
 
+    if (details.username !== undefined) {
+      fields.push('username = ?');
+      values.push(details.username);
+    }
     if (details.name !== undefined) {
       fields.push('name = ?');
       values.push(details.name);

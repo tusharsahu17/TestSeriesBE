@@ -1,9 +1,100 @@
 const studentDashboardModel = require('../models/studentDashboardModel');
 const notificationModel = require('../models/notificationModel');
+const userModel = require('../models/userModel');
 
 function getUserId(req) {
   return Number(req.user?.userId || req.user?.id);
 }
+
+const getProfile = async (req, res) => {
+  try {
+    const profile = await userModel.getUserById(getUserId(req));
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+    res.json({ success: true, data: profile });
+  } catch (error) {
+    console.error('Error fetching student profile:', error);
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || 'Failed to fetch student profile',
+    });
+  }
+};
+
+const updateProfile = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { username, name, email, phone } = req.body || {};
+    const updates = {};
+
+    if (phone !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number cannot be changed',
+      });
+    }
+
+    if (username !== undefined) {
+      const trimmedUsername = username === null ? '' : String(username).trim();
+      if (!/^[a-zA-Z0-9]{3,30}$/.test(trimmedUsername)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Username must be 3-30 alphanumeric characters',
+        });
+      }
+      const existingUser = await userModel.findUserByUsername(trimmedUsername);
+      if (existingUser && Number(existingUser.id) !== userId) {
+        return res.status(409).json({
+          success: false,
+          message: 'Username already exists',
+        });
+      }
+      updates.username = trimmedUsername;
+    }
+    if (name !== undefined) {
+      updates.name = name === null ? null : String(name).trim() || null;
+    }
+    if (email !== undefined) {
+      const trimmedEmail = email === null ? null : String(email).trim();
+      if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+        return res.status(400).json({ success: false, message: 'Invalid email format' });
+      }
+      updates.email = trimmedEmail || null;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one field (username, name, email) is required',
+      });
+    }
+
+    const updated = await userModel.updateUserDetails(userId, updates);
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    const profile = await userModel.getUserById(userId);
+    res.json({
+      success: true,
+      message: 'Student profile updated successfully',
+      data: profile,
+    });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        success: false,
+        message: 'Username or email already exists',
+      });
+    }
+    console.error('Error updating student profile:', error);
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || 'Failed to update student profile',
+    });
+  }
+};
 
 const getFullDashboard = async (req, res) => {
   try {
@@ -249,6 +340,8 @@ const markAllNotificationsRead = async (req, res) => {
 };
 
 module.exports = {
+  getProfile,
+  updateProfile,
   getFullDashboard,
   getDashboardSummary,
   getMyTestSeries,

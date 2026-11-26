@@ -14,6 +14,62 @@ router.use(authenticateStudent);
 
 /**
  * @swagger
+ * /api/user/profile:
+ *   get:
+ *     summary: Get authenticated student profile information
+ *     tags: [Student Dashboard]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Student profile details
+ *       401:
+ *         description: Token required
+ *       404:
+ *         description: Student profile not found
+ */
+router.get('/profile', studentDashboardController.getProfile);
+
+/**
+ * @swagger
+ * /api/user/profile:
+ *   put:
+ *     summary: Update authenticated student profile information
+ *     tags: [Student Dashboard]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               username:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *                 nullable: true
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 nullable: true
+ *     responses:
+ *       200:
+ *         description: Student profile updated successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Token required
+ *       404:
+ *         description: Student profile not found
+ *       409:
+ *         description: Username or email already exists
+ */
+router.put('/profile', studentDashboardController.updateProfile);
+
+/**
+ * @swagger
  * /api/user/dashboard:
  *   get:
  *     summary: Get combined student dashboard payload (all 6 sections)
